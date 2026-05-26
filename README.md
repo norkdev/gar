@@ -89,9 +89,38 @@ a prompt nicety:
   warning recorded in the audit log** — the user can read both the report
   and the warning and decide.
 
-This loop has fired on a real end-to-end run: the first compose attempt
-produced 2 unknown citations out of 24; the re-prompt produced a
-fully-valid report on attempt 2.
+#### What the audit log actually looks like
+
+The audit log is JSONL — every LLM call, tool dispatch, and validator
+pass becomes one structured record carrying a `schema_version` field
+(so schema evolution doesn't strand old logs). A representative slice
+from a real run, formatted for readability:
+
+```jsonl
+{"timestamp":"2026-05-26T06:31:47Z","tool_name":"llm.complete",
+ "input":{"model":"claude-sonnet-4-6","message_count":3,"tool_count":2},
+ "output":{"text_blocks":1,"tool_uses":4,"stop_reason":"tool_use"},
+ "duration_ms":4520,"status":"ok","schema_version":"1.0"}
+{"timestamp":"2026-05-26T06:31:48Z","tool_name":"search_arxiv",
+ "input":{"query":"multi-agent user interest matching conversational"},
+ "output":{"result_count":10},
+ "duration_ms":1230,"status":"ok","schema_version":"1.0"}
+{"timestamp":"2026-05-26T06:38:32Z","tool_name":"grounding.validate",
+ "input":{"attempt":1,"evidence_count":12},
+ "output":{"is_valid":true,"citation_count":18,"unknown_count":0,
+           "unused_evidence_count":1},
+ "duration_ms":3,"status":"ok","schema_version":"1.0"}
+```
+
+A run of about 20 LLM messages + 30 tool dispatches lands in roughly
+80–100 KB of JSONL. Replay, retrieval-technique comparison, and the
+evaluation work in spec §future-work all start from this log.
+
+During development the re-prompt path fired and recovered on a real
+smoke run — the validator caught two unknown citations on the first
+compose attempt and the second attempt produced a fully-valid report.
+Logs from that specific run have since rotated; the path stays
+unit-tested in `backend/tests/agent/test_loop.py`.
 
 ### Why public and private sources are physically separated
 
