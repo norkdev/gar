@@ -35,7 +35,7 @@ from gar_backend.sources.base import SearchResult
 ARXIV_API = "https://export.arxiv.org/api/query"
 ARXIV_RATE_LIMIT_SECONDS = 3.0
 ARXIV_REQUEST_TIMEOUT_SECONDS = 60.0
-USER_AGENT = "gar/0.1 (+https://github.com/nork/gar)"
+USER_AGENT = "gar/0.1 (+https://github.com/norkdev/gar)"
 
 # Back-off schedule shared by 429 and read-timeout retries. Each entry is
 # the number of seconds slept BEFORE the next attempt; 1 initial attempt +
