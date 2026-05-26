@@ -5,6 +5,11 @@ import type { RunState } from "../lib/api";
 
 export function Completed({ state, onRestart }: { state: RunState; onRestart: () => void }) {
   const failed = state.status === "failed";
+  // saved_path is only set in vault mode (local CLI use); the picker /
+  // upload flow leaves saving to the client (Copy / Download buttons
+  // shown on the previous screen).
+  const hasSavedPath = Boolean(state.saved_path);
+
   return (
     <main>
       <Stepper status={state.status} />
@@ -12,13 +17,21 @@ export function Completed({ state, onRestart }: { state: RunState; onRestart: ()
 
       {failed ? (
         <div className="error">{state.error ?? "Unknown failure."}</div>
-      ) : (
+      ) : hasSavedPath ? (
         <>
           <p>Report saved at:</p>
-          <div className="saved-path">{state.saved_path ?? "(path not returned)"}</div>
+          <div className="saved-path">{state.saved_path}</div>
           <p className="muted">
             The filename has been appended to <code>.ignore</code> in the same folder, so future
             runs will skip it.
+          </p>
+        </>
+      ) : (
+        <>
+          <p>Report ready.</p>
+          <p className="muted">
+            The report was approved. If you used the Copy or Download button on the previous screen,
+            the Markdown is now in your hands — drop it into your vault wherever you like.
           </p>
         </>
       )}

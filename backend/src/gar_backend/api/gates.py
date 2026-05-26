@@ -25,7 +25,11 @@ from gar_backend.api.deps import (
     get_public_source,
     get_run_store,
 )
-from gar_backend.api.runs import build_agent_context, serialize_state
+from gar_backend.api.runs import (
+    build_agent_context,
+    ideas_source_for_state,
+    serialize_state,
+)
 from gar_backend.governance.audit import AuditLogger
 from gar_backend.governance.hitl import (
     InvalidTransition,
@@ -61,9 +65,8 @@ async def _resume(
     state = await store.get(run_id)
     if state is None:
         raise HTTPException(404, f"Run {run_id} disappeared during transition")
-    vault_path = Path(state.context["vault_path"])
     ctx = build_agent_context(
-        vault_path=vault_path,
+        ideas=ideas_source_for_state(state),
         store=store,
         audit=audit,
         llm=llm,
@@ -144,11 +147,16 @@ async def approve_report_endpoint(
     except InvalidTransition as exc:
         raise HTTPException(409, str(exc)) from exc
 
-    report_content = state.pending_payload.get("report", "")
-    vault_path = Path(state.context["vault_path"])
-    saved_path = save_report(content=report_content, vault_path=vault_path)
-
     await store.save(new_state)
     response = serialize_state(new_state)
-    response["saved_path"] = str(saved_path)
+
+    # Vault mode: save the report to disk and append the filename to
+    # .ignore so re-runs skip it. Content mode: the client is responsible
+    # for persisting (Copy / Download buttons in the UI).
+    if "vault_path" in state.context:
+        report_content = state.pending_payload.get("report", "")
+        vault_path = Path(state.context["vault_path"])
+        saved_path = save_report(content=report_content, vault_path=vault_path)
+        response["saved_path"] = str(saved_path)
+
     return response

@@ -53,7 +53,7 @@ from gar_backend.governance.hitl import (
     start,
 )
 from gar_backend.governance.rbac import AccessContext, ToolRegistry
-from gar_backend.ideas.reader import UnsupportedFileType, read
+from gar_backend.ideas.reader import IdeaDocument, UnsupportedFileType, read
 from gar_backend.ideas.walker import walk
 from gar_backend.reports.linkify import linkify_report
 from gar_backend.sources.base import SearchResult
@@ -93,10 +93,40 @@ MAX_COMPOSE_ATTEMPTS = 2
 COMPOSE_REPORT_MAX_TOKENS = 16384
 
 
-def create_run(*, run_id: str, tenant_id: str, vault_path: Path) -> RunState:
-    """Initialize a fresh RunState with the vault path recorded in context."""
+def create_run(
+    *,
+    run_id: str,
+    tenant_id: str,
+    vault_path: Path | None = None,
+    notes_content: list[dict[str, str]] | None = None,
+) -> RunState:
+    """Initialize a fresh RunState.
+
+    Provide exactly one of:
+
+    - ``vault_path`` — for filesystem-backed runs (CLI / unit tests).
+      ``state.context["vault_path"]`` is set.
+    - ``notes_content`` — for content-upload runs (browser picker /
+      future Obsidian plugin). Each item is ``{"path": str, "content": str}``.
+      ``state.context["notes_content"]`` is set.
+
+    The presence of one key vs the other in ``context`` is what distinguishes
+    "vault mode" from "content mode" downstream.
+    """
+    if (vault_path is None) == (notes_content is None):
+        raise ValueError("provide exactly one of vault_path or notes_content")
     base = start(run_id, tenant_id)
-    return replace(base, context={"vault_path": str(vault_path)})
+    context: dict[str, Any] = {}
+    if vault_path is not None:
+        context["vault_path"] = str(vault_path)
+    else:
+        # Stored as plain dicts so the state remains JSON-serializable
+        # (audit log / future DynamoDB / wait-for-callback payloads).
+        assert notes_content is not None
+        context["notes_content"] = [
+            {"path": n["path"], "content": n["content"]} for n in notes_content
+        ]
+    return replace(base, context=context)
 
 
 async def run_until_gate(*, run_id: str, ctx: AgentContext) -> RunState:
@@ -119,6 +149,12 @@ async def run_until_gate(*, run_id: str, ctx: AgentContext) -> RunState:
 async def _run_one_phase(state: RunState, ctx: AgentContext) -> RunState:
     try:
         if state.status is RunStatus.DERIVING_CONCEPT:
+            if "notes_content" in state.context:
+                documents = [
+                    IdeaDocument(path=Path(item["path"]), content=item["content"])
+                    for item in state.context["notes_content"]
+                ]
+                return await phase_derive_concept(state, ctx, documents=documents)
             vault_path = Path(state.context["vault_path"])
             return await phase_derive_concept(state, ctx, vault_path=vault_path)
         if state.status is RunStatus.SEARCHING:
@@ -136,24 +172,46 @@ async def _run_one_phase(state: RunState, ctx: AgentContext) -> RunState:
 
 
 async def phase_derive_concept(
-    state: RunState, ctx: AgentContext, *, vault_path: Path
+    state: RunState,
+    ctx: AgentContext,
+    *,
+    documents: list[IdeaDocument] | None = None,
+    vault_path: Path | None = None,
 ) -> RunState:
-    """Read every idea file, summarize into a concept, request approval."""
-    documents = []
-    for path in walk(vault_path):
-        try:
-            documents.append(read(path))
-        except UnsupportedFileType:
-            continue
+    """Summarize the user's notes into a concept, then request approval.
+
+    Two input modes:
+
+    - ``documents`` — already-loaded notes (browser picker / Obsidian plugin).
+      Each document's ``path`` is treated as a display label.
+    - ``vault_path`` — walk the filesystem and read every supported file
+      (CLI / unit tests). Used when ``documents`` is not provided.
+    """
+    if documents is None:
+        if vault_path is None:
+            return fail(state, error="No documents or vault_path provided")
+        documents = []
+        for path in walk(vault_path):
+            try:
+                documents.append(read(path))
+            except UnsupportedFileType:
+                continue
 
     if not documents:
-        return fail(state, error=f"No readable idea documents at {vault_path}")
+        location = f" at {vault_path}" if vault_path is not None else ""
+        return fail(state, error=f"No readable idea documents{location}")
 
-    base = vault_path.parent if vault_path.is_file() else vault_path
+    # Display path: relative to the vault root when filesystem-backed,
+    # already-relative for content mode.
+    if vault_path is not None:
+        base = vault_path.parent if vault_path.is_file() else vault_path
+        display_paths = [doc.path.relative_to(base).as_posix() for doc in documents]
+    else:
+        display_paths = [doc.path.as_posix() for doc in documents]
+
     parts = []
-    for doc in documents:
-        rel = doc.path.relative_to(base).as_posix()
-        parts.append(f"--- {rel} ---\n{doc.content}\n")
+    for display_path, doc in zip(display_paths, documents, strict=False):
+        parts.append(f"--- {display_path} ---\n{doc.content}\n")
     notes_text = "\n".join(parts)
 
     response = await _audited_complete(

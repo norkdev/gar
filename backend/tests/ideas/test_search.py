@@ -2,7 +2,8 @@
 
 from pathlib import Path
 
-from gar_backend.ideas.search import SOURCE_NAME, IdeasSource
+from gar_backend.ideas.reader import IdeaDocument
+from gar_backend.ideas.search import SOURCE_NAME, IdeasSource, InMemoryIdeasSource
 
 
 async def test_search_finds_matching_file(tmp_path: Path) -> None:
@@ -120,3 +121,88 @@ async def test_search_no_authors_for_private_notes(tmp_path: Path) -> None:
     source = IdeasSource(tmp_path)
     results = await source.search("quantum")
     assert results[0].authors == ()
+
+
+# ---------- list_all (used by phase_derive_concept) ----------
+
+
+async def test_list_all_returns_every_supported_document(tmp_path: Path) -> None:
+    (tmp_path / "a.md").write_text("alpha")
+    (tmp_path / "b.md").write_text("beta")
+    source = IdeasSource(tmp_path)
+    docs = await source.list_all()
+    paths = sorted(d.path.name for d in docs)
+    assert paths == ["a.md", "b.md"]
+
+
+# ---------- InMemoryIdeasSource ----------
+
+
+def _docs(*entries: tuple[str, str]) -> list[IdeaDocument]:
+    return [IdeaDocument(path=Path(p), content=c) for (p, c) in entries]
+
+
+async def test_inmemory_search_finds_matching_document() -> None:
+    source = InMemoryIdeasSource(_docs(("a.md", "Quantum is fun"), ("b.md", "Cooking")))
+    results = await source.search("quantum")
+    assert len(results) == 1
+    assert results[0].external_id == "a.md"
+
+
+async def test_inmemory_search_is_case_insensitive() -> None:
+    source = InMemoryIdeasSource(_docs(("note.md", "Quantum Mechanics")))
+    results = await source.search("QUANTUM")
+    assert len(results) == 1
+
+
+async def test_inmemory_search_uses_and_semantics_across_terms() -> None:
+    source = InMemoryIdeasSource(
+        _docs(("both.md", "quantum and biology"), ("one.md", "just quantum")),
+    )
+    results = await source.search("quantum biology")
+    assert [r.external_id for r in results] == ["both.md"]
+
+
+async def test_inmemory_search_external_id_is_the_path_as_given() -> None:
+    """For content-mode the path is whatever the client provided (a label)."""
+    source = InMemoryIdeasSource(_docs(("vault/folder/deep.md", "quantum")))
+    results = await source.search("quantum")
+    assert results[0].external_id == "vault/folder/deep.md"
+
+
+async def test_inmemory_search_url_is_empty_string() -> None:
+    """No real URL exists in content mode — the linkifier leaves these as plain text."""
+    source = InMemoryIdeasSource(_docs(("a.md", "quantum")))
+    results = await source.search("quantum")
+    assert results[0].url == ""
+
+
+async def test_inmemory_search_source_name_matches_filesystem_version() -> None:
+    """Both implementations must declare the same source name so citations resolve."""
+    source = InMemoryIdeasSource(_docs(("a.md", "quantum")))
+    results = await source.search("quantum")
+    assert results[0].source_name == SOURCE_NAME
+
+
+async def test_inmemory_search_respects_max_results() -> None:
+    source = InMemoryIdeasSource(_docs(*[(f"n{i}.md", "quantum") for i in range(5)]))
+    results = await source.search("quantum", max_results=2)
+    assert len(results) == 2
+
+
+async def test_inmemory_list_all_returns_provided_documents() -> None:
+    docs = _docs(("a.md", "alpha"), ("b.md", "beta"))
+    source = InMemoryIdeasSource(docs)
+    out = await source.list_all()
+    assert [d.path.name for d in out] == ["a.md", "b.md"]
+    assert [d.content for d in out] == ["alpha", "beta"]
+
+
+async def test_inmemory_list_all_returns_a_copy() -> None:
+    """Mutating the returned list must not affect the source's internal state."""
+    docs = _docs(("a.md", "alpha"))
+    source = InMemoryIdeasSource(docs)
+    out = await source.list_all()
+    out.clear()
+    again = await source.list_all()
+    assert len(again) == 1

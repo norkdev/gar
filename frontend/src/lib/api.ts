@@ -50,11 +50,24 @@ async function jsonOrThrow<T>(response: Response): Promise<T> {
   return response.json() as Promise<T>;
 }
 
-export function createRun(vaultPath: string): Promise<RunState> {
+export interface NoteInput {
+  /** Display label for the note. Typically the file's webkitRelativePath
+   *  (with the picked folder's name as prefix) or the bare filename. */
+  path: string;
+  content: string;
+}
+
+/** Start a run from uploaded note contents (picker flow).
+ *
+ *  The backend also accepts `{ vault_path }` for CLI / local-mode uses,
+ *  but the browser UI uses content uploads exclusively — the picker
+ *  cannot resolve absolute filesystem paths in any portable way.
+ */
+export function createRunWithNotes(notes: NoteInput[]): Promise<RunState> {
   return fetch("/runs", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ vault_path: vaultPath }),
+    body: JSON.stringify({ notes_content: notes }),
   }).then((r) => jsonOrThrow<RunState>(r));
 }
 

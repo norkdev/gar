@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, model_validator
 
 from gar_backend.agent.llm import LLMClient
 from gar_backend.agent.loop import AgentContext, create_run, run_until_gate
@@ -25,15 +25,38 @@ from gar_backend.api.deps import (
 from gar_backend.governance.audit import AuditLogger
 from gar_backend.governance.hitl import RunState
 from gar_backend.governance.rbac import AccessContext, ToolRegistry
-from gar_backend.ideas.search import IdeasSource
+from gar_backend.ideas.reader import IdeaDocument
+from gar_backend.ideas.search import IdeasSource, InMemoryIdeasSource
 from gar_backend.sources.base import PublicSource
 from gar_backend.state.runs import RunStore
 
 router = APIRouter(prefix="/runs", tags=["runs"])
 
 
+class NoteInput(BaseModel):
+    """One uploaded idea note. ``path`` is a display label, not a filesystem path."""
+
+    path: str
+    content: str
+
+
 class CreateRunRequest(BaseModel):
-    vault_path: str
+    """Start a new run.
+
+    Provide exactly one of:
+    - ``vault_path``: a filesystem path the backend can read (local mode).
+    - ``notes_content``: the note contents uploaded by the client (picker /
+      Obsidian plugin / future remote mode). No filesystem access happens.
+    """
+
+    vault_path: str | None = None
+    notes_content: list[NoteInput] | None = None
+
+    @model_validator(mode="after")
+    def _exactly_one(self) -> CreateRunRequest:
+        if (self.vault_path is None) == (self.notes_content is None):
+            raise ValueError("provide exactly one of vault_path or notes_content")
+        return self
 
 
 def serialize_state(state: RunState) -> dict[str, Any]:
@@ -51,24 +74,25 @@ def serialize_state(state: RunState) -> dict[str, Any]:
 
 def build_agent_context(
     *,
-    vault_path: Path,
+    ideas: IdeasSource | InMemoryIdeasSource,
     store: RunStore,
     audit: AuditLogger,
     llm: LLMClient,
     access: AccessContext,
     public_source: PublicSource,
 ) -> AgentContext:
-    """Wire AgentContext for a given vault. Public so api/gates.py can reuse.
+    """Wire AgentContext for a given run. Public so api/gates.py can reuse.
 
     ``public_source`` is injected (not created here) so a single
     process-wide instance can enforce its provider's rate-limit policy
-    across all requests.
+    across all requests. ``ideas`` is per-run because it carries either
+    the vault path or the uploaded content.
     """
     registry = ToolRegistry()
     register_default_tools(
         registry,
         public_source=public_source,
-        ideas=IdeasSource(vault_path),
+        ideas=ideas,
     )
     return AgentContext(
         llm=llm,
@@ -77,6 +101,21 @@ def build_agent_context(
         store=store,
         access=access,
     )
+
+
+def ideas_source_for_state(state: RunState) -> IdeasSource | InMemoryIdeasSource:
+    """Re-construct the right ideas source from a stored state's context.
+
+    Used both at run start and on each gate resume so the agent loop has
+    the same data view across requests.
+    """
+    if "notes_content" in state.context:
+        documents = [
+            IdeaDocument(path=Path(item["path"]), content=item["content"])
+            for item in state.context["notes_content"]
+        ]
+        return InMemoryIdeasSource(documents)
+    return IdeasSource(Path(state.context["vault_path"]))
 
 
 @router.post("")
@@ -88,22 +127,31 @@ async def create_run_endpoint(
     access: AccessContext = Depends(get_access_context),
     public_source: PublicSource = Depends(get_public_source),
 ) -> dict[str, Any]:
-    vault_path = Path(req.vault_path)
-    if not vault_path.exists():
-        raise HTTPException(
-            status_code=400, detail=f"vault_path does not exist: {vault_path}"
+    run_id = str(uuid.uuid4())
+
+    if req.vault_path is not None:
+        vault_path = Path(req.vault_path)
+        if not vault_path.exists():
+            raise HTTPException(
+                status_code=400, detail=f"vault_path does not exist: {vault_path}"
+            )
+        state = create_run(
+            run_id=run_id, tenant_id=access.tenant_id, vault_path=vault_path
+        )
+    else:
+        assert req.notes_content is not None  # validator guarantees
+        state = create_run(
+            run_id=run_id,
+            tenant_id=access.tenant_id,
+            notes_content=[
+                {"path": n.path, "content": n.content} for n in req.notes_content
+            ],
         )
 
-    run_id = str(uuid.uuid4())
-    state = create_run(
-        run_id=run_id,
-        tenant_id=access.tenant_id,
-        vault_path=vault_path,
-    )
     await store.save(state)
 
     ctx = build_agent_context(
-        vault_path=vault_path,
+        ideas=ideas_source_for_state(state),
         store=store,
         audit=audit,
         llm=llm,
