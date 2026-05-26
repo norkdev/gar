@@ -1,30 +1,64 @@
-// Live activity feed during the long-running POSTs (search / compose phases).
-// Subscribes to the SSE stream and renders the rolling audit log.
+// Live activity feed during long-running POSTs (search / compose phases).
+//
+// Layout:
+//   ┌─────────────────────────────────┐
+//   │  ███████░░░░░░░░░░░░░░░░░░░░░░  │  indeterminate progress bar
+//   ├─────────────────────────────────┤
+//   │  ▸ Activity  (12 events)        │  collapsible header
+//   ├─────────────────────────────────┤
+//   │   …event lines…                 │  visible only when expanded
+//   └─────────────────────────────────┘
+//
+// Default collapsed, since the event lines pile up quickly and push the
+// approval buttons off-screen. The progress bar stays visible regardless
+// so the user can see *something* is happening.
 
+import { useState } from "react";
 import type { AuditEvent } from "../lib/sse";
 
 export function Activity({ events, hint }: { events: AuditEvent[]; hint?: string }) {
+  const [open, setOpen] = useState(false);
   return (
-    <div>
+    <div className="activity-wrapper">
       {hint && (
-        <p className="subtle" style={{ marginTop: "var(--sp-4)", marginBottom: "var(--sp-2)" }}>
+        <p className="subtle" style={{ marginTop: 0, marginBottom: "var(--sp-2)" }}>
           {hint}
         </p>
       )}
-      <div className="activity" role="log" aria-live="polite">
-        {events.length === 0 && (
-          <div className="activity-line">
-            <span className="activity-summary">Waiting for activity…</span>
-          </div>
-        )}
-        {events.map((e, i) => (
-          <div key={i} className={e.status === "error" ? "activity-line error" : "activity-line"}>
-            <span className="activity-time">{e.timestamp.slice(11, 19)}</span>
-            <span className="activity-tool">{e.tool_name}</span>
-            <span className="activity-summary">{summarize(e)}</span>
-          </div>
-        ))}
+      <div className="activity-progress" role="progressbar" aria-label="Agent working" />
+      <div className="activity-header">
+        <button
+          type="button"
+          className={open ? "activity-toggle open" : "activity-toggle"}
+          onClick={() => setOpen((v) => !v)}
+          aria-expanded={open}
+          aria-controls="activity-log"
+        >
+          <span className="activity-caret" aria-hidden="true">
+            ▶
+          </span>
+          <span>Activity</span>
+        </button>
+        <span className="activity-count">
+          {events.length} event{events.length === 1 ? "" : "s"}
+        </span>
       </div>
+      {open && (
+        <div id="activity-log" className="activity" role="log" aria-live="polite">
+          {events.length === 0 && (
+            <div className="activity-line">
+              <span className="activity-summary">Waiting for activity…</span>
+            </div>
+          )}
+          {events.map((e, i) => (
+            <div key={i} className={e.status === "error" ? "activity-line error" : "activity-line"}>
+              <span className="activity-time">{e.timestamp.slice(11, 19)}</span>
+              <span className="activity-tool">{e.tool_name}</span>
+              <span className="activity-summary">{summarize(e)}</span>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
