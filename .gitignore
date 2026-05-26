@@ -30,6 +30,9 @@ audit*.jsonl
 .env.local
 .env.*.local
 
+# Local-only design notes (kept out of the public repo)
+implementation_brief.md
+
 # OS / editor
 .DS_Store
 Thumbs.db

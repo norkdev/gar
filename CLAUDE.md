@@ -34,7 +34,7 @@ Summary of the non-negotiables `spec.md` establishes (see the file for full deta
 - **Seven scale seams from v1** (spec.md §10): `tenant_id` on every record, UI never calls AWS directly, agent state mirrored to DynamoDB, HITL as durable state, LLM client abstracted (Anthropic↔Bedrock-swappable), `schema_version` on audit logs, auth check at the API boundary (stub today).
 - **Personal project, public repo.** No employer code, customer data, or internal know-how may enter this repo. Credentials stay out of git.
 
-When a design choice is ambiguous, defer to the brief's intent over convenience. The README is expected to **explain the design judgments** (why agent loop, why the agent prepares material rather than a judgement, how each governance pillar is realized, retrieval-technique tradeoffs, limits, Future Work) — keep notes as you build so this can be written without archeology later.
+When a design choice is ambiguous, defer to the spec's intent over convenience. The README is expected to **explain the design judgments** (why agent loop, why the agent prepares material rather than a judgement, how each governance pillar is realized, retrieval-technique tradeoffs, limits, Future Work) — keep notes as you build so this can be written without archeology later.
 
 ## Environment & commands
 

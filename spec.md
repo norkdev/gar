@@ -1,6 +1,6 @@
 # spec：Guided Agentic Retrieval for Literature Survey
 
-このドキュメントは、`implementation_brief.md`（オリジナルの入力契約）に対して、対話の中で確定した補足・訂正・設計判断を取り込んだ **現時点の作業 spec** である。両者が食い違うときは spec.md を優先する。spec.md に書かれていない実装詳細（具体的なクラス構成・ライブラリ・関数 API など）は v1 実装の中で決める。
+このドキュメントは、対話の中で確定した補足・訂正・設計判断を取り込んだ **現時点の作業 spec** である。spec.md に書かれていない実装詳細（具体的なクラス構成・ライブラリ・関数 API など）は v1 実装の中で決める。
 
 > 表向きラベルは "Guided Agentic Retrieval"。内部の設計用語としては従来通り「統治レイヤ／governance」を使う（4 要素を実装で見せるという主張を保つため）。
 

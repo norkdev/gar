@@ -329,7 +329,6 @@ frontend/src/
 infra/                  AWS CDK (Python) — 5 stacks, currently scaffolded
 backend/tests/          221 tests, mirrors src/ layout
 spec.md                 Working spec (Japanese)
-implementation_brief.md Original input contract (Japanese)
 CLAUDE.md               Notes for Claude Code working in this repo
 ```
 
