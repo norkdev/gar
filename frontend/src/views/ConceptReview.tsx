@@ -3,6 +3,7 @@
 // activity while it runs.
 
 import { useState } from "react";
+import { Stepper } from "../components/Stepper";
 import { approveConcept } from "../lib/api";
 import type { RunState } from "../lib/api";
 import { useRunStream } from "../lib/sse";
@@ -37,7 +38,8 @@ export function ConceptReview({
 
   return (
     <main>
-      <h1>Gate 1 — Concept review</h1>
+      <Stepper status={state.status} />
+      <h1>Concept review</h1>
       <p className="muted">
         The agent derived this concept from your notes. Edit it if needed. Approving triggers the
         related-work search (typically 1–3 minutes).
@@ -52,7 +54,7 @@ export function ConceptReview({
 
       {err && <div className="error">{err}</div>}
 
-      <p style={{ marginTop: "1rem" }}>
+      <div className="row" style={{ marginTop: "var(--sp-4)" }}>
         <button onClick={submit} disabled={busy}>
           {busy
             ? "Searching related work…"
@@ -60,12 +62,17 @@ export function ConceptReview({
               ? "Approve & search"
               : "Approve edits & search"}
         </button>
-      </p>
+        {draft !== initial && !busy && (
+          <button className="ghost" onClick={() => setDraft(initial)}>
+            Revert edits
+          </button>
+        )}
+      </div>
 
       {busy && (
         <Activity
           events={events}
-          hint="Live activity from the agent (LLM calls and public-source searches)."
+          hint="Live activity from the agent — LLM calls and arXiv searches."
         />
       )}
     </main>

@@ -1,18 +1,14 @@
 // Gate 3: review the composed report and approve to save to disk.
-//
-// The report is composed Markdown with linkified citations:
-//   - Inline citations link to anchor targets inside the References section.
-//   - Reference entries link out to the source's canonical URL.
-// We render it with react-markdown + GFM, allowing the raw `<a id="...">`
-// anchor tags the backend's linkifier emits (the content is server-trusted,
-// not user-supplied HTML).
 
 import { useState } from "react";
 import ReactMarkdown from "react-markdown";
 import rehypeRaw from "rehype-raw";
 import remarkGfm from "remark-gfm";
+import { Stepper } from "../components/Stepper";
 import { approveReport } from "../lib/api";
 import type { RunState } from "../lib/api";
+
+type Tab = "rendered" | "raw";
 
 export function FinalReport({
   state,
@@ -24,7 +20,8 @@ export function FinalReport({
   const report = state.pending_payload.report ?? "";
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
-  const [showSource, setShowSource] = useState(false);
+  const [tab, setTab] = useState<Tab>("rendered");
+  const [copied, setCopied] = useState(false);
 
   const submit = async () => {
     setBusy(true);
@@ -39,23 +36,59 @@ export function FinalReport({
     }
   };
 
+  const copy = async () => {
+    await navigator.clipboard.writeText(report);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1500);
+  };
+
+  const download = () => {
+    const blob = new Blob([report], { type: "text/markdown;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `gar-report-${state.run_id}.md`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
+
   return (
     <main>
-      <h1>Gate 3 — Final report</h1>
+      <Stepper status={state.status} />
+      <h1>Final report</h1>
       <p className="muted">
         Review the report below. Approving saves it as a Markdown file in your vault and appends the
-        filename to <code>.ignore</code> so re-runs skip it.{" "}
-        <button
-          type="button"
-          className="secondary"
-          style={{ padding: "0.2rem 0.5rem", fontSize: "0.8rem" }}
-          onClick={() => setShowSource((s) => !s)}
-        >
-          {showSource ? "Show rendered" : "Show raw Markdown"}
-        </button>
+        filename to <code>.ignore</code> so re-runs skip it.
       </p>
 
-      {showSource ? (
+      <div className="tabs">
+        <button
+          type="button"
+          className={tab === "rendered" ? "tab active" : "tab"}
+          onClick={() => setTab("rendered")}
+        >
+          Rendered
+        </button>
+        <button
+          type="button"
+          className={tab === "raw" ? "tab active" : "tab"}
+          onClick={() => setTab("raw")}
+        >
+          Raw Markdown
+        </button>
+        <div className="tab-actions">
+          <button type="button" className="ghost" onClick={copy}>
+            {copied ? "Copied ✓" : "Copy"}
+          </button>
+          <button type="button" className="ghost" onClick={download}>
+            Download
+          </button>
+        </div>
+      </div>
+
+      {tab === "raw" ? (
         <pre className="report">{report}</pre>
       ) : (
         <div className="report-rendered">
@@ -64,8 +97,7 @@ export function FinalReport({
             rehypePlugins={[rehypeRaw]}
             components={{
               // Open every link in a new tab so clicking a citation does not
-              // navigate the preview away from the report (the user would
-              // otherwise lose unsaved review state).
+              // navigate the preview away from the report.
               a: ({ node: _node, ...props }) => (
                 <a {...props} target="_blank" rel="noopener noreferrer" />
               ),
@@ -78,11 +110,11 @@ export function FinalReport({
 
       {err && <div className="error">{err}</div>}
 
-      <p style={{ marginTop: "1rem" }}>
+      <div className="row" style={{ marginTop: "var(--sp-5)" }}>
         <button onClick={submit} disabled={busy}>
           {busy ? "Saving…" : "Approve & save"}
         </button>
-      </p>
+      </div>
     </main>
   );
 }

@@ -1,6 +1,7 @@
 // Top-level router. Picks a view based on the run's current status.
 
 import { useState } from "react";
+import { ThemeToggle } from "./components/ThemeToggle";
 import type { RunState } from "./lib/api";
 import { Completed } from "./views/Completed";
 import { ConceptReview } from "./views/ConceptReview";
@@ -11,6 +12,15 @@ import { Start } from "./views/Start";
 function App() {
   const [state, setState] = useState<RunState | null>(null);
 
+  return (
+    <>
+      <ThemeToggle />
+      {renderView(state, setState)}
+    </>
+  );
+}
+
+function renderView(state: RunState | null, setState: (s: RunState | null) => void) {
   if (state === null) {
     return <Start onStarted={setState} />;
   }

@@ -24,14 +24,17 @@ export function Start({ onStarted }: { onStarted: (s: RunState) => void }) {
 
   return (
     <main>
-      <h1>Guided Agentic Retrieval — Literature Survey</h1>
+      <h1>Guided Agentic Retrieval</h1>
       <p className="muted">
-        Point this at a folder of Markdown idea notes (an Obsidian vault or a sub-folder), or a
-        single .md file. The agent will derive a concept and survey public literature for related
-        work.
+        Survey published literature against your private idea notes. The agent gathers grounded
+        candidates and stops there — the novelty judgement stays with you.
       </p>
 
       <h2>Idea source</h2>
+      <p className="muted" style={{ marginTop: 0 }}>
+        Point this at a folder of Markdown notes (an Obsidian vault or a sub-folder), or a single{" "}
+        <code>.md</code> file. v1 reads Markdown only.
+      </p>
       <input
         type="text"
         value={vaultPath}
@@ -39,23 +42,19 @@ export function Start({ onStarted }: { onStarted: (s: RunState) => void }) {
         placeholder="/path/to/vault or /path/to/note.md"
         spellCheck={false}
       />
-      <p className="muted" style={{ marginTop: "0.5rem" }}>
-        v1 supports Markdown only. Reports save into the same folder (the parent if a file is
-        given), so the agent must have read+write access.
+      <p className="subtle" style={{ marginTop: "var(--sp-2)" }}>
+        Reports save into the same folder (or the parent if a file is given) and the filename is
+        appended to <code>.ignore</code> so re-runs skip it.
       </p>
 
       {err && <div className="error">{err}</div>}
 
-      <p style={{ marginTop: "1.5rem" }}>
+      <div className="row" style={{ marginTop: "var(--sp-5)" }}>
         <button onClick={submit} disabled={busy || vaultPath.trim() === ""}>
           {busy ? "Deriving concept…" : "Start"}
         </button>
-        {busy && (
-          <span className="muted" style={{ marginLeft: "1rem" }}>
-            The first LLM call usually takes 5–15 seconds.
-          </span>
-        )}
-      </p>
+        {busy && <span className="muted">The first LLM call usually takes 5–15 seconds.</span>}
+      </div>
     </main>
   );
 }

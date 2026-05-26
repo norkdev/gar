@@ -1,0 +1,97 @@
+/*
+ * Design tokens.
+ *
+ * Color comes from Radix Colors (12-step scales, calibrated light/dark).
+ * Everything else (typography / spacing / radius) is hand-written so the
+ * design judgements remain visible.
+ *
+ * Theme switch: set class="light" or class="dark" on <html>. Radix Colors
+ * scopes its variables under :root/.light vs .dark, so semantic tokens
+ * below resolve correctly in both.
+ */
+
+@import "@radix-ui/colors/slate.css";
+@import "@radix-ui/colors/slate-dark.css";
+@import "@radix-ui/colors/iris.css";
+@import "@radix-ui/colors/iris-dark.css";
+@import "@radix-ui/colors/red.css";
+@import "@radix-ui/colors/red-dark.css";
+@import "@radix-ui/colors/grass.css";
+@import "@radix-ui/colors/grass-dark.css";
+
+:root {
+  /* Page surfaces */
+  --color-bg: var(--slate-2);
+  --color-surface: var(--slate-1);
+  --color-surface-2: var(--slate-3);
+  --color-border: var(--slate-6);
+  --color-border-strong: var(--slate-8);
+
+  /* Text */
+  --color-text: var(--slate-12);
+  --color-text-muted: var(--slate-11);
+  --color-text-subtle: var(--slate-10);
+
+  /* Accent (iris — soft indigo, reads "academic" rather than "saas") */
+  --color-accent: var(--iris-9);
+  --color-accent-hover: var(--iris-10);
+  --color-accent-bg: var(--iris-3);
+  --color-accent-bg-strong: var(--iris-4);
+  --color-accent-border: var(--iris-7);
+  --color-accent-text: var(--iris-11);
+  --color-accent-on: white;
+
+  /* Semantic */
+  --color-error: var(--red-11);
+  --color-error-bg: var(--red-3);
+  --color-error-border: var(--red-6);
+  --color-success: var(--grass-11);
+
+  /* Typography
+   * Sans = UI chrome (labels, buttons, controls).
+   * Serif = long-form reading (the rendered report). Mirrors the "this is
+   *   a research artifact, not a dashboard" stance.
+   * Mono = code, IDs, raw Markdown, audit log lines.
+   */
+  --font-sans: "Inter", system-ui, -apple-system, "Segoe UI", "Helvetica Neue", sans-serif;
+  --font-serif:
+    "Iowan Old Style", "Apple Garamond", "Source Serif Pro", Georgia, "Times New Roman", serif;
+  --font-mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+
+  --fs-xs: 0.78rem;
+  --fs-sm: 0.875rem;
+  --fs-base: 0.95rem;
+  --fs-md: 1rem;
+  --fs-lg: 1.125rem;
+  --fs-xl: 1.375rem;
+  --fs-2xl: 1.75rem;
+
+  --lh-tight: 1.25;
+  --lh-normal: 1.5;
+  --lh-relaxed: 1.7;
+
+  --fw-regular: 400;
+  --fw-medium: 500;
+  --fw-semibold: 600;
+  --fw-bold: 700;
+
+  /* Spacing — 4px base scale */
+  --sp-1: 0.25rem;
+  --sp-2: 0.5rem;
+  --sp-3: 0.75rem;
+  --sp-4: 1rem;
+  --sp-5: 1.5rem;
+  --sp-6: 2rem;
+  --sp-7: 3rem;
+  --sp-8: 4rem;
+
+  /* Radius — kept small; "documents not cards" */
+  --radius-sm: 3px;
+  --radius-md: 5px;
+  --radius-lg: 8px;
+
+  /* Motion */
+  --duration-fast: 120ms;
+  --duration-base: 180ms;
+  --ease-out: cubic-bezier(0.2, 0.8, 0.2, 1);
+}
