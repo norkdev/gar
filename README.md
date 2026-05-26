@@ -1,5 +1,13 @@
 # GAR — Guided Agentic Retrieval for Literature Survey
 
+[![CI](https://github.com/norkdev/gar/actions/workflows/ci.yml/badge.svg)](https://github.com/norkdev/gar/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+
+Surveys arXiv against your private Markdown idea notes. Every step is
+audited; humans gate access, source selection, and the final report.
+
+---
+
 A small, runnable codebase that helps a researcher or engineer survey
 published literature against their own in-progress idea — and stops there.
 The agent surfaces the closest related work with citations the user can
@@ -19,8 +27,8 @@ inside.
 > Status: v1 backend complete; 221 unit / integration tests passing;
 > end-to-end smoke runs against the live arXiv API and the Anthropic
 > Claude API have produced complete, cited reports. Frontend is a minimal
-> React/TypeScript shell with a rendered Markdown preview. AWS deployment
-> scaffolding (CDK) is wired but resources are stubs.
+> React/TypeScript shell with a rendered Markdown preview. AWS infra
+> (CDK) synthesises but defines no resources yet.
 
 ---
 
@@ -81,9 +89,9 @@ a prompt nicety:
   warning recorded in the audit log** — the user can read both the report
   and the warning and decide.
 
-We've watched this loop fire in production: on the most recent smoke run,
-the first compose attempt produced 2 unknown citations out of 24; the
-re-prompt produced a fully-valid report on attempt 2.
+This loop has fired on a real end-to-end run: the first compose attempt
+produced 2 unknown citations out of 24; the re-prompt produced a
+fully-valid report on attempt 2.
 
 ### Why public and private sources are physically separated
 
@@ -345,3 +353,9 @@ CLAUDE.md               Notes for Claude Code working in this repo
 - LLM inference is via the Anthropic Claude API.
 - This is a personal project. No employer code, customer data, or
   internal know-how is in this repository.
+
+---
+
+## License
+
+MIT — see [LICENSE](LICENSE).
