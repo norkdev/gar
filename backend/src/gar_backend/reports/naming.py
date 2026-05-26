@@ -2,8 +2,9 @@
 
 - The save directory is the vault folder (if vault_path is a folder) or
   its parent (if vault_path is a single file).
-- Filenames are ``report-YYYY-MM-DD.md``; same-day reruns get ``-2``,
-  ``-3``, etc.
+- Filenames are ``gar-report-YYYY-MM-DD.md``; same-day reruns get ``-2``,
+  ``-3``, etc. The ``gar-`` prefix matches the suggested filename in the
+  web UI's save dialog so both code paths produce identical names.
 - Past reports are never overwritten.
 - Each generated filename is appended to ``.ignore`` in the same directory
   so the walker skips it on subsequent runs.
@@ -12,7 +13,7 @@
 from datetime import date
 from pathlib import Path
 
-REPORT_PREFIX = "report"
+REPORT_PREFIX = "gar-report"
 IGNORE_FILENAME = ".ignore"
 
 
@@ -24,8 +25,8 @@ def resolve_save_dir(vault_path: Path) -> Path:
 def next_report_filename(save_dir: Path, today: date) -> str:
     """Return a filename that does not collide with existing files.
 
-    First call on a given day → ``report-YYYY-MM-DD.md``.
-    Subsequent same-day calls → ``report-YYYY-MM-DD-2.md``, ``-3.md``, ...
+    First call on a given day → ``gar-report-YYYY-MM-DD.md``.
+    Subsequent same-day calls → ``gar-report-YYYY-MM-DD-2.md``, ``-3.md``, ...
     """
     base = f"{REPORT_PREFIX}-{today.isoformat()}"
     if not (save_dir / f"{base}.md").exists():

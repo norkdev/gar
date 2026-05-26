@@ -12,7 +12,7 @@ def test_save_report_writes_content_to_dated_filename(tmp_path: Path) -> None:
         vault_path=tmp_path,
         today=date(2026, 5, 25),
     )
-    assert path == tmp_path / "report-2026-05-25.md"
+    assert path == tmp_path / "gar-report-2026-05-25.md"
     assert path.read_text() == "# Report body"
 
 
@@ -23,7 +23,7 @@ def test_save_report_appends_to_ignore(tmp_path: Path) -> None:
         today=date(2026, 5, 25),
     )
     ignore = (tmp_path / ".ignore").read_text()
-    assert "report-2026-05-25.md" in ignore
+    assert "gar-report-2026-05-25.md" in ignore
 
 
 def test_save_report_with_file_vault_saves_in_parent(tmp_path: Path) -> None:
@@ -35,7 +35,7 @@ def test_save_report_with_file_vault_saves_in_parent(tmp_path: Path) -> None:
         today=date(2026, 5, 25),
     )
     assert path.parent == tmp_path
-    assert path.name == "report-2026-05-25.md"
+    assert path.name == "gar-report-2026-05-25.md"
 
 
 def test_save_report_same_day_twice_uses_suffix(tmp_path: Path) -> None:
@@ -49,7 +49,7 @@ def test_save_report_same_day_twice_uses_suffix(tmp_path: Path) -> None:
         vault_path=tmp_path,
         today=date(2026, 5, 25),
     )
-    assert second.name == "report-2026-05-25-2.md"
+    assert second.name == "gar-report-2026-05-25-2.md"
     assert second.read_text() == "second"
 
 
@@ -71,13 +71,13 @@ def test_save_report_records_both_files_in_ignore(tmp_path: Path) -> None:
     save_report(content="x", vault_path=tmp_path, today=date(2026, 5, 25))
     save_report(content="y", vault_path=tmp_path, today=date(2026, 5, 25))
     lines = (tmp_path / ".ignore").read_text().splitlines()
-    assert "report-2026-05-25.md" in lines
-    assert "report-2026-05-25-2.md" in lines
+    assert "gar-report-2026-05-25.md" in lines
+    assert "gar-report-2026-05-25-2.md" in lines
 
 
 def test_save_report_default_date_is_today(tmp_path: Path) -> None:
     """Smoke test that the default `today` parameter resolves without crashing."""
     path = save_report(content="x", vault_path=tmp_path)
-    # Filename should follow `report-YYYY-MM-DD.md` pattern
-    assert path.name.startswith("report-")
+    # Filename should follow `gar-report-YYYY-MM-DD.md` pattern
+    assert path.name.startswith("gar-report-")
     assert path.name.endswith(".md")

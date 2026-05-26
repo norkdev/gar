@@ -27,65 +27,77 @@ def test_resolve_save_dir_for_file_is_parent(tmp_path: Path) -> None:
 
 
 def test_next_report_filename_first_call_uses_date(tmp_path: Path) -> None:
-    assert next_report_filename(tmp_path, date(2026, 5, 25)) == "report-2026-05-25.md"
+    assert (
+        next_report_filename(tmp_path, date(2026, 5, 25)) == "gar-report-2026-05-25.md"
+    )
 
 
 def test_next_report_filename_second_call_adds_suffix_2(tmp_path: Path) -> None:
-    (tmp_path / "report-2026-05-25.md").write_text("existing")
-    assert next_report_filename(tmp_path, date(2026, 5, 25)) == "report-2026-05-25-2.md"
+    (tmp_path / "gar-report-2026-05-25.md").write_text("existing")
+    assert (
+        next_report_filename(tmp_path, date(2026, 5, 25))
+        == "gar-report-2026-05-25-2.md"
+    )
 
 
 def test_next_report_filename_continues_to_increment(tmp_path: Path) -> None:
     for name in [
-        "report-2026-05-25.md",
-        "report-2026-05-25-2.md",
-        "report-2026-05-25-3.md",
+        "gar-report-2026-05-25.md",
+        "gar-report-2026-05-25-2.md",
+        "gar-report-2026-05-25-3.md",
     ]:
         (tmp_path / name).write_text("x")
-    assert next_report_filename(tmp_path, date(2026, 5, 25)) == "report-2026-05-25-4.md"
+    assert (
+        next_report_filename(tmp_path, date(2026, 5, 25))
+        == "gar-report-2026-05-25-4.md"
+    )
 
 
 def test_next_report_filename_different_day_starts_fresh(tmp_path: Path) -> None:
-    (tmp_path / "report-2026-05-24.md").write_text("yesterday")
-    assert next_report_filename(tmp_path, date(2026, 5, 25)) == "report-2026-05-25.md"
+    (tmp_path / "gar-report-2026-05-24.md").write_text("yesterday")
+    assert (
+        next_report_filename(tmp_path, date(2026, 5, 25)) == "gar-report-2026-05-25.md"
+    )
 
 
 def test_next_report_filename_ignores_unrelated_files(tmp_path: Path) -> None:
     (tmp_path / "random.md").write_text("x")
     (tmp_path / "report-other-prefix.md").write_text("x")
-    assert next_report_filename(tmp_path, date(2026, 5, 25)) == "report-2026-05-25.md"
+    assert (
+        next_report_filename(tmp_path, date(2026, 5, 25)) == "gar-report-2026-05-25.md"
+    )
 
 
 # ---------- append_to_ignore ----------
 
 
 def test_append_to_ignore_creates_file_if_missing(tmp_path: Path) -> None:
-    ignore_path = append_to_ignore(tmp_path, "report-2026-05-25.md")
+    ignore_path = append_to_ignore(tmp_path, "gar-report-2026-05-25.md")
     assert ignore_path.name == IGNORE_FILENAME
-    assert ignore_path.read_text() == "report-2026-05-25.md\n"
+    assert ignore_path.read_text() == "gar-report-2026-05-25.md\n"
 
 
 def test_append_to_ignore_appends_to_existing_file(tmp_path: Path) -> None:
-    (tmp_path / IGNORE_FILENAME).write_text("report-2026-05-24.md\n")
-    append_to_ignore(tmp_path, "report-2026-05-25.md")
+    (tmp_path / IGNORE_FILENAME).write_text("gar-report-2026-05-24.md\n")
+    append_to_ignore(tmp_path, "gar-report-2026-05-25.md")
     lines = (tmp_path / IGNORE_FILENAME).read_text().splitlines()
-    assert lines == ["report-2026-05-24.md", "report-2026-05-25.md"]
+    assert lines == ["gar-report-2026-05-24.md", "gar-report-2026-05-25.md"]
 
 
 def test_append_to_ignore_no_duplicate_entries(tmp_path: Path) -> None:
     """Defensive: a partial-run retry shouldn't add the same name twice."""
-    (tmp_path / IGNORE_FILENAME).write_text("report-2026-05-25.md\n")
-    append_to_ignore(tmp_path, "report-2026-05-25.md")
+    (tmp_path / IGNORE_FILENAME).write_text("gar-report-2026-05-25.md\n")
+    append_to_ignore(tmp_path, "gar-report-2026-05-25.md")
     lines = (tmp_path / IGNORE_FILENAME).read_text().splitlines()
-    assert lines == ["report-2026-05-25.md"]
+    assert lines == ["gar-report-2026-05-25.md"]
 
 
 def test_append_to_ignore_preserves_other_user_entries(tmp_path: Path) -> None:
     """The user (or other tooling) may have added their own entries to .ignore."""
     (tmp_path / IGNORE_FILENAME).write_text("scratch.md\nsecret-notes.md\n")
-    append_to_ignore(tmp_path, "report-2026-05-25.md")
+    append_to_ignore(tmp_path, "gar-report-2026-05-25.md")
     lines = (tmp_path / IGNORE_FILENAME).read_text().splitlines()
-    assert lines == ["scratch.md", "secret-notes.md", "report-2026-05-25.md"]
+    assert lines == ["scratch.md", "secret-notes.md", "gar-report-2026-05-25.md"]
 
 
 def test_append_to_ignore_returns_ignore_path(tmp_path: Path) -> None:

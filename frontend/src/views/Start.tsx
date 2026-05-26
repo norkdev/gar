@@ -87,8 +87,8 @@ export function Start({ onStarted }: { onStarted: (s: RunState) => void }) {
       </p>
       <p className="subtle" style={{ marginTop: "var(--sp-2)" }}>
         Heads-up: <code>.gitignore</code> and <code>.ignore</code> are not consulted in the web UI.
-        Past <code>report-*.md</code> files in the picked folder will be re-uploaded unless you pick
-        a sub-folder or specific files. (The CLI honors them — see README.)
+        Past <code>gar-report-*.md</code> files in the picked folder will be re-uploaded unless you
+        pick a sub-folder or specific files. (The CLI honors them — see README.)
       </p>
 
       <input

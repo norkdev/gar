@@ -64,8 +64,8 @@ def test_walk_respects_gitignore_file_patterns(tmp_path: Path) -> None:
 
 def test_walk_respects_ignore_file_patterns(tmp_path: Path) -> None:
     """Spec §8: `.ignore` excludes the tool's generated reports on re-runs."""
-    (tmp_path / ".ignore").write_text("report-*.md\n")
-    (tmp_path / "report-2026-05-24.md").write_text("x")
+    (tmp_path / ".ignore").write_text("gar-report-*.md\n")
+    (tmp_path / "gar-report-2026-05-24.md").write_text("x")
     (tmp_path / "note.md").write_text("y")
     assert [p.name for p in walk(tmp_path)] == ["note.md"]
 
@@ -80,9 +80,9 @@ def test_walk_respects_gitignore_directory_patterns(tmp_path: Path) -> None:
 
 def test_walk_honors_gitignore_and_ignore_together(tmp_path: Path) -> None:
     (tmp_path / ".gitignore").write_text("scratch.md\n")
-    (tmp_path / ".ignore").write_text("report-*.md\n")
+    (tmp_path / ".ignore").write_text("gar-report-*.md\n")
     (tmp_path / "scratch.md").write_text("x")
-    (tmp_path / "report-1.md").write_text("y")
+    (tmp_path / "gar-report-1.md").write_text("y")
     (tmp_path / "keep.md").write_text("z")
     assert [p.name for p in walk(tmp_path)] == ["keep.md"]
 
