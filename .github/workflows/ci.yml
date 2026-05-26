@@ -2,8 +2,9 @@ name: CI
 
 on:
   push:
-    branches: [master, main]
+    branches: [main]
   pull_request:
+  workflow_dispatch:
 
 # Cancel an in-flight run for the same branch / PR when a new push arrives.
 concurrency:
@@ -15,10 +16,10 @@ jobs:
     name: backend (pytest)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Set up uv (resolves Python from .python-version)
-        uses: astral-sh/setup-uv@v6
+        uses: astral-sh/setup-uv@v8.1.0
         with:
           enable-cache: true
 
@@ -38,10 +39,10 @@ jobs:
     name: frontend (tsc + vite build)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Set up Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: "24"
           cache: npm
