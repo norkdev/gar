@@ -15,7 +15,6 @@ from gar_backend.sources.arxiv import ArxivSource
 from gar_backend.sources.base import PublicSource
 from gar_backend.state.runs import InMemoryRunStore, RunStore
 
-
 DEFAULT_AUDIT_LOG_PATH = Path("audit.jsonl")
 
 

@@ -28,7 +28,6 @@ from gar_backend.governance.rbac import ToolRegistry
 from gar_backend.ideas.search import IdeasSource
 from gar_backend.sources.base import PublicSource, SearchResult
 
-
 IDEAS_TOOL_NAME = "search_private_ideas"
 
 
@@ -154,28 +153,32 @@ async def dispatch(
     start = time.perf_counter()
     try:
         output = await tool.handler(**input_args)
-        audit.log(AuditRecord(
-            run_id=run_id,
-            tenant_id=tenant_id,
-            tool_name=tool.name,
-            input=input_args,
-            output={
-                "result_count": len(output) if isinstance(output, list) else None
-            },
-            duration_ms=(time.perf_counter() - start) * 1000,
-            status="ok",
-        ))
+        audit.log(
+            AuditRecord(
+                run_id=run_id,
+                tenant_id=tenant_id,
+                tool_name=tool.name,
+                input=input_args,
+                output={
+                    "result_count": len(output) if isinstance(output, list) else None
+                },
+                duration_ms=(time.perf_counter() - start) * 1000,
+                status="ok",
+            )
+        )
         return output
     except Exception as exc:
-        audit.log(AuditRecord(
-            run_id=run_id,
-            tenant_id=tenant_id,
-            tool_name=tool.name,
-            input=input_args,
-            duration_ms=(time.perf_counter() - start) * 1000,
-            status="error",
-            error=f"{type(exc).__name__}: {exc}",
-        ))
+        audit.log(
+            AuditRecord(
+                run_id=run_id,
+                tenant_id=tenant_id,
+                tool_name=tool.name,
+                input=input_args,
+                duration_ms=(time.perf_counter() - start) * 1000,
+                status="error",
+                error=f"{type(exc).__name__}: {exc}",
+            )
+        )
         raise
 
 

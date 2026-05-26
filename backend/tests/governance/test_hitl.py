@@ -3,7 +3,6 @@
 import dataclasses
 
 import pytest
-
 from gar_backend.governance.hitl import (
     AWAITING_STATES,
     InvalidTransition,

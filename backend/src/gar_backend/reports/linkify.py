@@ -21,7 +21,6 @@ as it emits a URL on its ``SearchResult``.
 import re
 from typing import Any
 
-
 CITATION_PATTERN = re.compile(r"\[([A-Za-z][A-Za-z0-9_-]*):([^\]\s]+)\]")
 
 

@@ -12,7 +12,6 @@ future multi-tenant / multi-role expansion without changes to callers.
 from dataclasses import dataclass
 from typing import Protocol
 
-
 # Roles permitted to see private (idea-source) tools.
 PRIVATE_ROLES: frozenset[str] = frozenset({"owner"})
 
@@ -55,9 +54,7 @@ class ToolRegistry:
 
     def register_private(self, tool: Tool) -> None:
         if tool.name in self._public:
-            raise ValueError(
-                f"Tool name '{tool.name}' is already registered as public"
-            )
+            raise ValueError(f"Tool name '{tool.name}' is already registered as public")
         self._private[tool.name] = tool
 
     def tools_for(self, context: AccessContext) -> list[Tool]:

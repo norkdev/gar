@@ -6,8 +6,7 @@ from gar_backend.reports.linkify import linkify_report
 def _evidence(*entries: tuple[str, str, str]) -> list[dict]:
     """Helper: build evidence dicts from (source_name, external_id, url) tuples."""
     return [
-        {"source_name": s, "external_id": eid, "url": url}
-        for (s, eid, url) in entries
+        {"source_name": s, "external_id": eid, "url": url} for (s, eid, url) in entries
     ]
 
 
@@ -86,7 +85,4 @@ def test_source_name_with_underscore_is_recognized() -> None:
             )
         ),
     )
-    assert (
-        r"\[[web_search:https://example.com/page](https://example.com/page)\]"
-        in out
-    )
+    assert r"\[[web_search:https://example.com/page](https://example.com/page)\]" in out

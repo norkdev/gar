@@ -48,9 +48,7 @@ def _load_ignore_spec(root: Path) -> pathspec.PathSpec:
     return pathspec.PathSpec.from_lines("gitignore", patterns)
 
 
-def _walk_dir(
-    current: Path, root: Path, spec: pathspec.PathSpec
-) -> Iterator[Path]:
+def _walk_dir(current: Path, root: Path, spec: pathspec.PathSpec) -> Iterator[Path]:
     for entry in sorted(current.iterdir()):
         if entry.is_symlink():
             continue

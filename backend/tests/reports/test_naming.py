@@ -10,7 +10,6 @@ from gar_backend.reports.naming import (
     resolve_save_dir,
 )
 
-
 # ---------- resolve_save_dir ----------
 
 
@@ -28,18 +27,12 @@ def test_resolve_save_dir_for_file_is_parent(tmp_path: Path) -> None:
 
 
 def test_next_report_filename_first_call_uses_date(tmp_path: Path) -> None:
-    assert (
-        next_report_filename(tmp_path, date(2026, 5, 25))
-        == "report-2026-05-25.md"
-    )
+    assert next_report_filename(tmp_path, date(2026, 5, 25)) == "report-2026-05-25.md"
 
 
 def test_next_report_filename_second_call_adds_suffix_2(tmp_path: Path) -> None:
     (tmp_path / "report-2026-05-25.md").write_text("existing")
-    assert (
-        next_report_filename(tmp_path, date(2026, 5, 25))
-        == "report-2026-05-25-2.md"
-    )
+    assert next_report_filename(tmp_path, date(2026, 5, 25)) == "report-2026-05-25-2.md"
 
 
 def test_next_report_filename_continues_to_increment(tmp_path: Path) -> None:
@@ -49,27 +42,18 @@ def test_next_report_filename_continues_to_increment(tmp_path: Path) -> None:
         "report-2026-05-25-3.md",
     ]:
         (tmp_path / name).write_text("x")
-    assert (
-        next_report_filename(tmp_path, date(2026, 5, 25))
-        == "report-2026-05-25-4.md"
-    )
+    assert next_report_filename(tmp_path, date(2026, 5, 25)) == "report-2026-05-25-4.md"
 
 
 def test_next_report_filename_different_day_starts_fresh(tmp_path: Path) -> None:
     (tmp_path / "report-2026-05-24.md").write_text("yesterday")
-    assert (
-        next_report_filename(tmp_path, date(2026, 5, 25))
-        == "report-2026-05-25.md"
-    )
+    assert next_report_filename(tmp_path, date(2026, 5, 25)) == "report-2026-05-25.md"
 
 
 def test_next_report_filename_ignores_unrelated_files(tmp_path: Path) -> None:
     (tmp_path / "random.md").write_text("x")
     (tmp_path / "report-other-prefix.md").write_text("x")
-    assert (
-        next_report_filename(tmp_path, date(2026, 5, 25))
-        == "report-2026-05-25.md"
-    )
+    assert next_report_filename(tmp_path, date(2026, 5, 25)) == "report-2026-05-25.md"
 
 
 # ---------- append_to_ignore ----------

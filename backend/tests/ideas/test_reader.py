@@ -3,7 +3,6 @@
 from pathlib import Path
 
 import pytest
-
 from gar_backend.ideas.reader import IdeaDocument, UnsupportedFileType, read
 
 

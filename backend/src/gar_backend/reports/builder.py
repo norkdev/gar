@@ -16,9 +16,7 @@ from gar_backend.reports.naming import (
 )
 
 
-def save_report(
-    *, content: str, vault_path: Path, today: date | None = None
-) -> Path:
+def save_report(*, content: str, vault_path: Path, today: date | None = None) -> Path:
     """Save ``content`` as a new report under the vault's save directory.
 
     Returns the path of the saved file. Also appends the filename to

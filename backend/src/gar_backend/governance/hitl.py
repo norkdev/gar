@@ -11,7 +11,7 @@ Storage (DynamoDB in production, in-memory in v1 tests) lives in
 """
 
 from dataclasses import dataclass, field, replace
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from enum import StrEnum
 from typing import Any
 
@@ -27,16 +27,20 @@ class RunStatus(StrEnum):
     FAILED = "failed"
 
 
-AWAITING_STATES: frozenset[RunStatus] = frozenset({
-    RunStatus.AWAITING_CONCEPT_APPROVAL,
-    RunStatus.AWAITING_SOURCE_SELECTION,
-    RunStatus.AWAITING_REPORT_APPROVAL,
-})
+AWAITING_STATES: frozenset[RunStatus] = frozenset(
+    {
+        RunStatus.AWAITING_CONCEPT_APPROVAL,
+        RunStatus.AWAITING_SOURCE_SELECTION,
+        RunStatus.AWAITING_REPORT_APPROVAL,
+    }
+)
 
-TERMINAL_STATES: frozenset[RunStatus] = frozenset({
-    RunStatus.COMPLETED,
-    RunStatus.FAILED,
-})
+TERMINAL_STATES: frozenset[RunStatus] = frozenset(
+    {
+        RunStatus.COMPLETED,
+        RunStatus.FAILED,
+    }
+)
 
 
 @dataclass(frozen=True)
@@ -56,9 +60,7 @@ class RunState:
     pending_payload: dict[str, Any] = field(default_factory=dict)
     adopted_source_ids: tuple[str, ...] = ()
     error: str | None = None
-    updated_at: datetime = field(
-        default_factory=lambda: datetime.now(timezone.utc)
-    )
+    updated_at: datetime = field(default_factory=lambda: datetime.now(UTC))
 
 
 class InvalidTransition(RuntimeError):
@@ -84,9 +86,7 @@ def request_concept_approval(state: RunState, *, concept: str) -> RunState:
     )
 
 
-def approve_concept(
-    state: RunState, *, edited_concept: str | None = None
-) -> RunState:
+def approve_concept(state: RunState, *, edited_concept: str | None = None) -> RunState:
     """Gate 1 approval. Pass `edited_concept` if the user edited the text."""
     _require(state, RunStatus.AWAITING_CONCEPT_APPROVAL)
     final = (
@@ -114,9 +114,7 @@ def request_source_selection(
     )
 
 
-def select_sources(
-    state: RunState, *, adopted_source_ids: list[str]
-) -> RunState:
+def select_sources(state: RunState, *, adopted_source_ids: list[str]) -> RunState:
     """Gate 2 approval. Records which sources the user adopted.
 
     Adopted IDs are expected in the composite ``source_name:external_id``
@@ -131,8 +129,7 @@ def select_sources(
     adopted_evidence = [
         c
         for c in candidates
-        if f"{c.get('source_name', '')}:{c.get('external_id', '')}"
-        in adopted_set
+        if f"{c.get('source_name', '')}:{c.get('external_id', '')}" in adopted_set
     ]
     return _advance(
         state,
@@ -178,10 +175,8 @@ def is_terminal(state: RunState) -> bool:
 
 def _require(state: RunState, expected: RunStatus) -> None:
     if state.status is not expected:
-        raise InvalidTransition(
-            f"Expected status {expected}, got {state.status}"
-        )
+        raise InvalidTransition(f"Expected status {expected}, got {state.status}")
 
 
 def _advance(state: RunState, **changes: Any) -> RunState:
-    return replace(state, updated_at=datetime.now(timezone.utc), **changes)
+    return replace(state, updated_at=datetime.now(UTC), **changes)

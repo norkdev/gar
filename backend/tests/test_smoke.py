@@ -1,7 +1,6 @@
 """Smoke test: FastAPI app boots and /healthz returns 200."""
 
 from fastapi.testclient import TestClient
-
 from gar_backend.main import app
 
 

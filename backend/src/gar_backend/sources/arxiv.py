@@ -68,9 +68,7 @@ class ArxivSource:
         self._lock = asyncio.Lock()
         self._last_request_at: float = 0.0
 
-    async def search(
-        self, query: str, *, max_results: int = 10
-    ) -> list[SearchResult]:
+    async def search(self, query: str, *, max_results: int = 10) -> list[SearchResult]:
         params = {
             "search_query": f"all:{query}",
             "start": 0,
@@ -98,9 +96,7 @@ class ArxivSource:
                 return _parse_feed(resp.text)
             if last_attempt:
                 resp.raise_for_status()  # propagate the 429
-            await asyncio.sleep(
-                min(ARXIV_RETRY_DELAYS[attempt], ARXIV_MAX_RETRY_DELAY)
-            )
+            await asyncio.sleep(min(ARXIV_RETRY_DELAYS[attempt], ARXIV_MAX_RETRY_DELAY))
 
         # Unreachable: the final attempt either returns or raises above.
         raise RuntimeError("arXiv retry loop fell through (should not happen)")

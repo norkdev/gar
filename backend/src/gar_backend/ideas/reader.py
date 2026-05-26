@@ -33,9 +33,7 @@ def read(path: Path) -> IdeaDocument:
     suffix = path.suffix.lower()
     if suffix == ".md":
         return _read_markdown(path)
-    raise UnsupportedFileType(
-        f"Unsupported file type '{path.suffix}' for {path}"
-    )
+    raise UnsupportedFileType(f"Unsupported file type '{path.suffix}' for {path}")
 
 
 def _read_markdown(path: Path) -> IdeaDocument:

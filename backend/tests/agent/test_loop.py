@@ -5,7 +5,6 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-
 from gar_backend.agent import loop
 from gar_backend.agent.llm import LLMResponse, Message, RateLimitError, ToolUse
 from gar_backend.agent.loop import (
@@ -30,7 +29,6 @@ from gar_backend.governance.rbac import AccessContext, ToolRegistry
 from gar_backend.sources.base import SearchResult
 from gar_backend.state.runs import InMemoryRunStore
 
-
 # ---------- helpers ----------
 
 
@@ -50,13 +48,15 @@ class StubLLM:
         model: str,
         max_tokens: int = 4096,
     ) -> LLMResponse:
-        self.calls.append({
-            "system": system,
-            "messages": messages,
-            "tools": tools,
-            "model": model,
-            "max_tokens": max_tokens,
-        })
+        self.calls.append(
+            {
+                "system": system,
+                "messages": messages,
+                "tools": tools,
+                "model": model,
+                "max_tokens": max_tokens,
+            }
+        )
         if not self._responses:
             raise RuntimeError("StubLLM out of canned responses")
         item = self._responses.pop(0)
@@ -76,9 +76,7 @@ class _FakePublicSource:
         self._results = results or []
         self.last_query: str | None = None
 
-    async def search(
-        self, query: str, *, max_results: int = 10
-    ) -> list[SearchResult]:
+    async def search(self, query: str, *, max_results: int = 10) -> list[SearchResult]:
         self.last_query = query
         return list(self._results)
 
@@ -120,9 +118,7 @@ def _state_at_searching(tmp_path: Path) -> Any:
     return state
 
 
-def _state_at_evaluating(
-    tmp_path: Path, adopted: list[str] | None = None
-) -> Any:
+def _state_at_evaluating(tmp_path: Path, adopted: list[str] | None = None) -> Any:
     state = _state_at_searching(tmp_path)
     state = request_source_selection(state, candidates=[])
     state = select_sources(state, adopted_source_ids=adopted or [])
@@ -214,17 +210,21 @@ async def test_search_finishes_when_llm_does_not_call_tools(
 async def test_search_collects_candidates_via_tool_dispatch(
     tmp_path: Path,
 ) -> None:
-    fake = _FakePublicSource(results=[
-        SearchResult("test_source", "T-1", "P1", "abs", (), None, "http://x"),
-        SearchResult("test_source", "T-2", "P2", "abs", (), None, "http://y"),
-    ])
+    fake = _FakePublicSource(
+        results=[
+            SearchResult("test_source", "T-1", "P1", "abs", (), None, "http://x"),
+            SearchResult("test_source", "T-2", "P2", "abs", (), None, "http://y"),
+        ]
+    )
     registry = ToolRegistry()
     register_default_tools(registry, public_source=fake)  # type: ignore[arg-type]
 
-    llm = StubLLM([
-        _tool_use("tu1", fake.tool_name, {"query": "widgets"}),
-        _text("Done with shortlist."),
-    ])
+    llm = StubLLM(
+        [
+            _tool_use("tu1", fake.tool_name, {"query": "widgets"}),
+            _text("Done with shortlist."),
+        ]
+    )
     ctx = _build_ctx(tmp_path, llm, registry=registry)
 
     state = _state_at_searching(tmp_path)
@@ -239,18 +239,18 @@ async def test_search_collects_candidates_via_tool_dispatch(
 async def test_search_dedupes_candidates_by_source_and_id(
     tmp_path: Path,
 ) -> None:
-    duplicate = SearchResult(
-        "test_source", "same.1", "P", "x", (), None, "http://x"
-    )
+    duplicate = SearchResult("test_source", "same.1", "P", "x", (), None, "http://x")
     fake = _FakePublicSource(results=[duplicate, duplicate])
     registry = ToolRegistry()
     register_default_tools(registry, public_source=fake)  # type: ignore[arg-type]
 
-    llm = StubLLM([
-        _tool_use("tu1", fake.tool_name, {"query": "q1"}),
-        _tool_use("tu2", fake.tool_name, {"query": "q2"}),
-        _text("Done."),
-    ])
+    llm = StubLLM(
+        [
+            _tool_use("tu1", fake.tool_name, {"query": "q1"}),
+            _tool_use("tu2", fake.tool_name, {"query": "q2"}),
+            _text("Done."),
+        ]
+    )
     ctx = _build_ctx(tmp_path, llm, registry=registry)
 
     state = _state_at_searching(tmp_path)
@@ -263,10 +263,9 @@ async def test_search_respects_max_iterations(tmp_path: Path) -> None:
     registry = ToolRegistry()
     register_default_tools(registry, public_source=fake)  # type: ignore[arg-type]
 
-    llm = StubLLM([
-        _tool_use(f"tu{i}", fake.tool_name, {"query": "q"})
-        for i in range(5)
-    ])
+    llm = StubLLM(
+        [_tool_use(f"tu{i}", fake.tool_name, {"query": "q"}) for i in range(5)]
+    )
     ctx = _build_ctx(tmp_path, llm, registry=registry, max_search_iterations=2)
 
     state = _state_at_searching(tmp_path)
@@ -347,9 +346,7 @@ def _state_at_evaluating_with_evidence(
     state = request_concept_approval(state, concept="widget concept")
     state = approve_concept(state)
     state = request_source_selection(state, candidates=adopted)
-    composite_ids = [
-        f"{c['source_name']}:{c['external_id']}" for c in adopted
-    ]
+    composite_ids = [f"{c['source_name']}:{c['external_id']}" for c in adopted]
     state = select_sources(state, adopted_source_ids=composite_ids)
     return state
 
@@ -370,12 +367,9 @@ async def test_compose_report_validates_and_skips_retry_when_valid(
     assert len(llm.calls) == 1  # validated on first attempt, no retry
 
     records = [
-        json.loads(line)
-        for line in (tmp_path / "audit.jsonl").read_text().splitlines()
+        json.loads(line) for line in (tmp_path / "audit.jsonl").read_text().splitlines()
     ]
-    grounding_records = [
-        r for r in records if r["tool_name"] == "grounding.validate"
-    ]
+    grounding_records = [r for r in records if r["tool_name"] == "grounding.validate"]
     assert len(grounding_records) == 1
     assert grounding_records[0]["output"]["is_valid"] is True
 
@@ -439,10 +433,12 @@ async def test_compose_report_retries_when_citations_are_unknown(
         tmp_path,
         adopted=[{"source_name": "test_source", "external_id": "1.1", "title": "P1"}],
     )
-    llm = StubLLM([
-        _text("First try with [author2016:test_source:1.1] bad citation"),
-        _text("Second try with [test_source:1.1] correct citation"),
-    ])
+    llm = StubLLM(
+        [
+            _text("First try with [author2016:test_source:1.1] bad citation"),
+            _text("Second try with [test_source:1.1] correct citation"),
+        ]
+    )
     ctx = _build_ctx(tmp_path, llm)
 
     new = await phase_compose_report(state, ctx)
@@ -453,12 +449,9 @@ async def test_compose_report_retries_when_citations_are_unknown(
     assert len(llm.calls) == 2
 
     records = [
-        json.loads(line)
-        for line in (tmp_path / "audit.jsonl").read_text().splitlines()
+        json.loads(line) for line in (tmp_path / "audit.jsonl").read_text().splitlines()
     ]
-    grounding_records = [
-        r for r in records if r["tool_name"] == "grounding.validate"
-    ]
+    grounding_records = [r for r in records if r["tool_name"] == "grounding.validate"]
     assert [r["output"]["is_valid"] for r in grounding_records] == [False, True]
 
 
@@ -471,10 +464,12 @@ async def test_compose_report_accepts_latest_after_max_attempts(
         tmp_path,
         adopted=[{"source_name": "test_source", "external_id": "1.1"}],
     )
-    llm = StubLLM([
-        _text("Try 1 [bogus:1.1]"),
-        _text("Try 2 [also_bogus:9.9]"),
-    ])
+    llm = StubLLM(
+        [
+            _text("Try 1 [bogus:1.1]"),
+            _text("Try 2 [also_bogus:9.9]"),
+        ]
+    )
     ctx = _build_ctx(tmp_path, llm)
 
     new = await phase_compose_report(state, ctx)
@@ -507,12 +502,9 @@ async def test_compose_report_skips_validation_when_no_evidence(
     assert len(llm.calls) == 1
 
     records = [
-        json.loads(line)
-        for line in (tmp_path / "audit.jsonl").read_text().splitlines()
+        json.loads(line) for line in (tmp_path / "audit.jsonl").read_text().splitlines()
     ]
-    grounding_records = [
-        r for r in records if r["tool_name"] == "grounding.validate"
-    ]
+    grounding_records = [r for r in records if r["tool_name"] == "grounding.validate"]
     assert grounding_records == []  # no validation runs when no evidence
 
 
@@ -594,9 +586,7 @@ async def test_audited_complete_logs_error_and_reraises(
     ctx = _build_ctx(tmp_path, BoomLLM())
 
     with pytest.raises(RuntimeError, match="kaboom"):
-        await _audited_complete(
-            ctx, "r1", system="", messages=[], tools=[]
-        )
+        await _audited_complete(ctx, "r1", system="", messages=[], tools=[])
 
     record = json.loads((tmp_path / "audit.jsonl").read_text())
     assert record["status"] == "error"
@@ -607,7 +597,8 @@ async def test_audited_complete_logs_error_and_reraises(
 
 
 async def test_audited_complete_retries_on_rate_limit_then_succeeds(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(loop, "RETRY_INITIAL_DELAY_SEC", 0.001)
     monkeypatch.setattr(loop, "RETRY_MAX_DELAY_SEC", 0.001)
@@ -616,14 +607,17 @@ async def test_audited_complete_retries_on_rate_limit_then_succeeds(
     ctx = _build_ctx(tmp_path, llm)
 
     response = await _audited_complete(
-        ctx, "r1", system="", messages=[], tools=[],
+        ctx,
+        "r1",
+        system="",
+        messages=[],
+        tools=[],
     )
     assert response.text_blocks == ("recovered",)
     assert len(llm.calls) == 2
 
     records = [
-        json.loads(line)
-        for line in (tmp_path / "audit.jsonl").read_text().splitlines()
+        json.loads(line) for line in (tmp_path / "audit.jsonl").read_text().splitlines()
     ]
     assert [r["status"] for r in records] == ["error", "ok"]
     assert records[0]["input"]["attempt"] == 1
@@ -631,26 +625,32 @@ async def test_audited_complete_retries_on_rate_limit_then_succeeds(
 
 
 async def test_audited_complete_propagates_after_max_attempts(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(loop, "RETRY_INITIAL_DELAY_SEC", 0.001)
     monkeypatch.setattr(loop, "RETRY_MAX_DELAY_SEC", 0.001)
 
-    llm = StubLLM([
-        RateLimitError("limit 1"),
-        RateLimitError("limit 2"),
-        RateLimitError("limit 3"),
-    ])
+    llm = StubLLM(
+        [
+            RateLimitError("limit 1"),
+            RateLimitError("limit 2"),
+            RateLimitError("limit 3"),
+        ]
+    )
     ctx = _build_ctx(tmp_path, llm)
 
     with pytest.raises(RateLimitError, match="limit 3"):
         await _audited_complete(
-            ctx, "r1", system="", messages=[], tools=[],
+            ctx,
+            "r1",
+            system="",
+            messages=[],
+            tools=[],
         )
 
     records = [
-        json.loads(line)
-        for line in (tmp_path / "audit.jsonl").read_text().splitlines()
+        json.loads(line) for line in (tmp_path / "audit.jsonl").read_text().splitlines()
     ]
     assert len(records) == loop.RETRY_MAX_ATTEMPTS
     assert all(r["status"] == "error" for r in records)
@@ -664,7 +664,11 @@ async def test_audited_complete_does_not_retry_on_non_rate_limit(
 
     with pytest.raises(ValueError, match="permanent bug"):
         await _audited_complete(
-            ctx, "r1", system="", messages=[], tools=[],
+            ctx,
+            "r1",
+            system="",
+            messages=[],
+            tools=[],
         )
 
     lines = (tmp_path / "audit.jsonl").read_text().splitlines()

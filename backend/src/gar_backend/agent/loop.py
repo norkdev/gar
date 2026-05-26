@@ -38,7 +38,8 @@ from gar_backend.agent.prompts import (
 )
 from gar_backend.agent.tools import AgentTool, dispatch
 from gar_backend.governance.audit import AuditLogger, AuditRecord
-from gar_backend.governance.grounding import GroundingReport, validate as validate_grounding
+from gar_backend.governance.grounding import GroundingReport
+from gar_backend.governance.grounding import validate as validate_grounding
 from gar_backend.governance.hitl import (
     InvalidTransition,
     RunState,
@@ -146,9 +147,7 @@ async def phase_derive_concept(
             continue
 
     if not documents:
-        return fail(
-            state, error=f"No readable idea documents at {vault_path}"
-        )
+        return fail(state, error=f"No readable idea documents at {vault_path}")
 
     base = vault_path.parent if vault_path.is_file() else vault_path
     parts = []
@@ -164,14 +163,16 @@ async def phase_derive_concept(
         messages=[
             Message(
                 role="user",
-                content=[{
-                    "type": "text",
-                    "text": (
-                        "Here are the user's private notes (possibly "
-                        f"unfinished):\n\n{notes_text}\n\n"
-                        "Summarize the core concept these notes describe."
-                    ),
-                }],
+                content=[
+                    {
+                        "type": "text",
+                        "text": (
+                            "Here are the user's private notes (possibly "
+                            f"unfinished):\n\n{notes_text}\n\n"
+                            "Summarize the core concept these notes describe."
+                        ),
+                    }
+                ],
             )
         ],
         tools=[],
@@ -197,14 +198,16 @@ async def phase_search(state: RunState, ctx: AgentContext) -> RunState:
     messages: list[Message] = [
         Message(
             role="user",
-            content=[{
-                "type": "text",
-                "text": (
-                    f"Concept to investigate:\n{concept}\n\n"
-                    "Search for related work using the available tools. When "
-                    "you have a reasonable shortlist, stop calling tools."
-                ),
-            }],
+            content=[
+                {
+                    "type": "text",
+                    "text": (
+                        f"Concept to investigate:\n{concept}\n\n"
+                        "Search for related work using the available tools. When "
+                        "you have a reasonable shortlist, stop calling tools."
+                    ),
+                }
+            ],
         )
     ]
     candidates: list[dict[str, Any]] = []
@@ -225,12 +228,14 @@ async def phase_search(state: RunState, ctx: AgentContext) -> RunState:
         for tu in response.tool_uses:
             tool = tool_by_name.get(tu.name)
             if tool is None:
-                tool_result_blocks.append({
-                    "type": "tool_result",
-                    "tool_use_id": tu.id,
-                    "content": f"Unknown tool: {tu.name}",
-                    "is_error": True,
-                })
+                tool_result_blocks.append(
+                    {
+                        "type": "tool_result",
+                        "tool_use_id": tu.id,
+                        "content": f"Unknown tool: {tu.name}",
+                        "is_error": True,
+                    }
+                )
                 continue
             try:
                 output = await dispatch(
@@ -242,31 +247,31 @@ async def phase_search(state: RunState, ctx: AgentContext) -> RunState:
                 )
                 if isinstance(output, list):
                     candidates.extend(output)
-                tool_result_blocks.append({
-                    "type": "tool_result",
-                    "tool_use_id": tu.id,
-                    "content": json.dumps(output, default=str),
-                })
+                tool_result_blocks.append(
+                    {
+                        "type": "tool_result",
+                        "tool_use_id": tu.id,
+                        "content": json.dumps(output, default=str),
+                    }
+                )
             except Exception as exc:
-                tool_result_blocks.append({
-                    "type": "tool_result",
-                    "tool_use_id": tu.id,
-                    "content": f"{type(exc).__name__}: {exc}",
-                    "is_error": True,
-                })
+                tool_result_blocks.append(
+                    {
+                        "type": "tool_result",
+                        "tool_use_id": tu.id,
+                        "content": f"{type(exc).__name__}: {exc}",
+                        "is_error": True,
+                    }
+                )
         messages.append(Message(role="user", content=tool_result_blocks))
 
-    return request_source_selection(
-        state, candidates=_dedupe_candidates(candidates)
-    )
+    return request_source_selection(state, candidates=_dedupe_candidates(candidates))
 
 
 # ------------- phase: compose report -------------
 
 
-async def phase_compose_report(
-    state: RunState, ctx: AgentContext
-) -> RunState:
+async def phase_compose_report(state: RunState, ctx: AgentContext) -> RunState:
     """Compose the final report from concept + adopted sources.
 
     Workflow:
@@ -292,7 +297,6 @@ async def phase_compose_report(
     ]
 
     report = ""
-    last_report_validation: GroundingReport | None = None
     for attempt in range(MAX_COMPOSE_ATTEMPTS):
         response = await _audited_complete(
             ctx,
@@ -320,25 +324,26 @@ async def phase_compose_report(
             break
 
         validation = _validate_report(report, adopted_evidence_dicts)
-        last_report_validation = validation
-        ctx.audit.log(AuditRecord(
-            run_id=state.run_id,
-            tenant_id=ctx.access.tenant_id,
-            tool_name="grounding.validate",
-            input={
-                "attempt": attempt + 1,
-                "evidence_count": len(adopted_evidence_dicts),
-            },
-            output={
-                "is_valid": validation.is_valid,
-                "has_citations": validation.has_citations,
-                "citation_count": len(validation.citations),
-                "unknown_count": len(validation.unknown_citations),
-                "unused_evidence_count": len(validation.unused_evidence),
-            },
-            duration_ms=0.0,
-            status="ok",
-        ))
+        ctx.audit.log(
+            AuditRecord(
+                run_id=state.run_id,
+                tenant_id=ctx.access.tenant_id,
+                tool_name="grounding.validate",
+                input={
+                    "attempt": attempt + 1,
+                    "evidence_count": len(adopted_evidence_dicts),
+                },
+                output={
+                    "is_valid": validation.is_valid,
+                    "has_citations": validation.has_citations,
+                    "citation_count": len(validation.citations),
+                    "unknown_count": len(validation.unknown_citations),
+                    "unused_evidence_count": len(validation.unused_evidence),
+                },
+                duration_ms=0.0,
+                status="ok",
+            )
+        )
         if validation.is_valid:
             break
         if attempt + 1 >= MAX_COMPOSE_ATTEMPTS:
@@ -349,25 +354,28 @@ async def phase_compose_report(
         messages.append(_assistant_message(response))
         unknown_list = ", ".join(c.raw for c in validation.unknown_citations[:10])
         valid_list = ", ".join(
-            f"[{e['source_name']}:{e['external_id']}]"
-            for e in adopted_evidence_dicts
+            f"[{e['source_name']}:{e['external_id']}]" for e in adopted_evidence_dicts
         )
-        messages.append(Message(
-            role="user",
-            content=[{
-                "type": "text",
-                "text": (
-                    "Your previous report contained citations that do NOT "
-                    f"appear in the adopted candidate list: {unknown_list}.\n\n"
-                    f"The ONLY valid citations are: {valid_list}.\n\n"
-                    "Rewrite the entire report. Replace each unknown citation "
-                    "with either a valid citation from the list (in the exact "
-                    "[source_name:external_id] form) or '(citation not "
-                    "available)' if the statement cannot be supported by an "
-                    "adopted source."
-                ),
-            }],
-        ))
+        messages.append(
+            Message(
+                role="user",
+                content=[
+                    {
+                        "type": "text",
+                        "text": (
+                            "Your previous report contained citations that do NOT "
+                            f"appear in the adopted candidate list: {unknown_list}.\n\n"
+                            f"The ONLY valid citations are: {valid_list}.\n\n"
+                            "Rewrite the entire report. Replace each unknown citation "
+                            "with either a valid citation from the list (in the exact "
+                            "[source_name:external_id] form) or '(citation not "
+                            "available)' if the statement cannot be supported by an "
+                            "adopted source."
+                        ),
+                    }
+                ],
+            )
+        )
 
     # Linkify citations after validation completes (success or max attempts).
     # No-op when there's no evidence to attach URLs to.
@@ -454,9 +462,7 @@ def _build_compose_user_text(
             # Cap to keep prompt size predictable; full abstract may not be
             # needed when it's very long.
             cap = 1500
-            shown_snippet = (
-                snippet if len(snippet) <= cap else snippet[: cap] + "…"
-            )
+            shown_snippet = snippet if len(snippet) <= cap else snippet[:cap] + "…"
             parts.append(f"  Abstract: {shown_snippet}")
         parts.append("")
     parts.append(
@@ -473,12 +479,14 @@ def _assistant_message(response: LLMResponse) -> Message:
     for text in response.text_blocks:
         content.append({"type": "text", "text": text})
     for tu in response.tool_uses:
-        content.append({
-            "type": "tool_use",
-            "id": tu.id,
-            "name": tu.name,
-            "input": tu.input,
-        })
+        content.append(
+            {
+                "type": "tool_use",
+                "id": tu.id,
+                "name": tu.name,
+                "input": tu.input,
+            }
+        )
     return Message(role="assistant", content=content)
 
 
@@ -530,47 +538,55 @@ async def _audited_complete(
                 max_tokens=max_tokens,
             )
         except RateLimitError as exc:
-            ctx.audit.log(AuditRecord(
-                run_id=run_id,
-                tenant_id=ctx.access.tenant_id,
-                tool_name="llm.complete",
-                input={**base_input, "attempt": attempt + 1},
-                duration_ms=(time.perf_counter() - start_time) * 1000,
-                status="error",
-                error=f"RateLimitError: {exc}",
-            ))
+            ctx.audit.log(
+                AuditRecord(
+                    run_id=run_id,
+                    tenant_id=ctx.access.tenant_id,
+                    tool_name="llm.complete",
+                    input={**base_input, "attempt": attempt + 1},
+                    duration_ms=(time.perf_counter() - start_time) * 1000,
+                    status="error",
+                    error=f"RateLimitError: {exc}",
+                )
+            )
             if attempt + 1 >= RETRY_MAX_ATTEMPTS:
                 raise
-            delay = exc.retry_after if exc.retry_after is not None else (
-                RETRY_INITIAL_DELAY_SEC * (2**attempt)
+            delay = (
+                exc.retry_after
+                if exc.retry_after is not None
+                else (RETRY_INITIAL_DELAY_SEC * (2**attempt))
             )
             await asyncio.sleep(min(delay, RETRY_MAX_DELAY_SEC))
             continue
         except Exception as exc:
-            ctx.audit.log(AuditRecord(
+            ctx.audit.log(
+                AuditRecord(
+                    run_id=run_id,
+                    tenant_id=ctx.access.tenant_id,
+                    tool_name="llm.complete",
+                    input={**base_input, "attempt": attempt + 1},
+                    duration_ms=(time.perf_counter() - start_time) * 1000,
+                    status="error",
+                    error=f"{type(exc).__name__}: {exc}",
+                )
+            )
+            raise
+
+        ctx.audit.log(
+            AuditRecord(
                 run_id=run_id,
                 tenant_id=ctx.access.tenant_id,
                 tool_name="llm.complete",
                 input={**base_input, "attempt": attempt + 1},
+                output={
+                    "text_blocks": len(response.text_blocks),
+                    "tool_uses": len(response.tool_uses),
+                    "stop_reason": response.stop_reason,
+                },
                 duration_ms=(time.perf_counter() - start_time) * 1000,
-                status="error",
-                error=f"{type(exc).__name__}: {exc}",
-            ))
-            raise
-
-        ctx.audit.log(AuditRecord(
-            run_id=run_id,
-            tenant_id=ctx.access.tenant_id,
-            tool_name="llm.complete",
-            input={**base_input, "attempt": attempt + 1},
-            output={
-                "text_blocks": len(response.text_blocks),
-                "tool_uses": len(response.tool_uses),
-                "stop_reason": response.stop_reason,
-            },
-            duration_ms=(time.perf_counter() - start_time) * 1000,
-            status="ok",
-        ))
+                status="ok",
+            )
+        )
         return response
 
     raise RuntimeError("retry loop fell through (should not happen)")

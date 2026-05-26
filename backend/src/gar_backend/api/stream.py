@@ -31,12 +31,10 @@ from fastapi.responses import StreamingResponse
 from gar_backend.api.deps import get_audit_log_path, get_run_store
 from gar_backend.api.runs import serialize_state
 from gar_backend.governance.hitl import (
-    RunState,
     is_awaiting_user,
     is_terminal,
 )
 from gar_backend.state.runs import RunStore
-
 
 router = APIRouter(prefix="/runs/{run_id}/events", tags=["stream"])
 
@@ -72,9 +70,7 @@ async def stream_events(
         for _ in range(MAX_STREAM_ITERATIONS):
             await asyncio.sleep(POLL_INTERVAL_SEC)
 
-            offset, new_records = _read_audit_since(
-                audit_path, offset, run_id
-            )
+            offset, new_records = _read_audit_since(audit_path, offset, run_id)
             for rec in new_records:
                 yield _sse("audit", rec)
 
@@ -91,9 +87,7 @@ async def stream_events(
 
             if is_terminal(current) or is_awaiting_user(current):
                 # Drain any final audit records emitted just before the gate.
-                offset, final_records = _read_audit_since(
-                    audit_path, offset, run_id
-                )
+                offset, final_records = _read_audit_since(audit_path, offset, run_id)
                 for rec in final_records:
                     yield _sse("audit", rec)
                 yield _sse("done", {"status": current.status.value})
@@ -101,16 +95,14 @@ async def stream_events(
 
         yield _sse("timeout", {"detail": "stream lifetime exceeded"})
 
-    return StreamingResponse(
-        event_generator(), media_type="text/event-stream"
-    )
+    return StreamingResponse(event_generator(), media_type="text/event-stream")
 
 
 def _sse(event: str, data: Any) -> bytes:
     """Encode one SSE message. Newlines in `data` (if it stringifies to one)
     are not specially escaped — `json.dumps` always emits single-line JSON."""
     payload = json.dumps(data, default=str)
-    return f"event: {event}\ndata: {payload}\n\n".encode("utf-8")
+    return f"event: {event}\ndata: {payload}\n\n".encode()
 
 
 def _read_audit_since(

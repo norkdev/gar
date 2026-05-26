@@ -6,7 +6,6 @@ generic ``"public_src"`` placeholder to make this independence visible.
 """
 
 from gar_backend.governance.grounding import (
-    Citation,
     extract_citations,
     validate,
 )
@@ -120,7 +119,9 @@ def test_validate_unused_evidence_empty_when_all_cited() -> None:
 
 def test_validate_source_name_must_match_in_citation() -> None:
     """A citation with the right id but wrong source_name is treated as unknown."""
-    text = "[public_src:note.md]"  # asserts source=public_src, but evidence is from ideas
+    text = (
+        "[public_src:note.md]"  # asserts source=public_src, but evidence is from ideas
+    )
     evidence = [_sr("ideas", "note.md")]
     report = validate(text, evidence)
     assert not report.is_valid
@@ -188,6 +189,7 @@ def test_validate_treats_plain_author_year_brackets_as_no_citation() -> None:
 def test_citation_is_frozen() -> None:
     """Citations should not be mutable after parsing."""
     import dataclasses
+
     [c] = extract_citations("[public_src:1.1]")
     with __import__("pytest").raises(dataclasses.FrozenInstanceError):
         c.external_id = "other"  # type: ignore[misc]

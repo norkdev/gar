@@ -1,6 +1,6 @@
 """state/runs unit tests."""
 
-from datetime import timedelta
+from datetime import UTC, timedelta
 
 from gar_backend.governance.hitl import RunStatus, start
 from gar_backend.state.runs import InMemoryRunStore
@@ -53,10 +53,10 @@ async def test_list_for_tenant_returns_empty_for_empty_store() -> None:
 
 async def test_list_for_tenant_sorted_by_updated_at_descending() -> None:
     from dataclasses import replace
-    from datetime import datetime, timezone
+    from datetime import datetime
 
     store = InMemoryRunStore()
-    base = datetime(2026, 5, 24, tzinfo=timezone.utc)
+    base = datetime(2026, 5, 24, tzinfo=UTC)
 
     older = replace(start("r1", "acme"), updated_at=base)
     newer = replace(start("r2", "acme"), updated_at=base + timedelta(hours=1))

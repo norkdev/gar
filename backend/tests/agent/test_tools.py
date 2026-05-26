@@ -6,11 +6,10 @@ depending on a specific source implementation.
 """
 
 import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
-
 from gar_backend.agent.tools import (
     IDEAS_TOOL_NAME,
     AgentTool,
@@ -45,9 +44,7 @@ class _FakePublicSource:
     def returns(self, results: list[SearchResult]) -> None:
         self._results = results
 
-    async def search(
-        self, query: str, *, max_results: int = 10
-    ) -> list[SearchResult]:
+    async def search(self, query: str, *, max_results: int = 10) -> list[SearchResult]:
         self.last_query = query
         self.last_max = max_results
         return list(self._results)
@@ -94,7 +91,7 @@ def test_serialize_result_round_trip_basic_fields() -> None:
         title="X",
         snippet="abstract",
         authors=("A", "B"),
-        published=datetime(2023, 1, 15, tzinfo=timezone.utc),
+        published=datetime(2023, 1, 15, tzinfo=UTC),
         url="http://example/X-1",
     )
     out = _serialize_result(sr)
@@ -122,17 +119,19 @@ def test_serialize_result_handles_missing_published() -> None:
 
 async def test_public_search_tool_handler_delegates_to_source() -> None:
     fake = _FakePublicSource()
-    fake.returns([
-        SearchResult(
-            source_name="fake_public",
-            external_id="X-1",
-            title="T",
-            snippet="S",
-            authors=(),
-            published=None,
-            url="http://x",
-        )
-    ])
+    fake.returns(
+        [
+            SearchResult(
+                source_name="fake_public",
+                external_id="X-1",
+                title="T",
+                snippet="S",
+                authors=(),
+                published=None,
+                url="http://x",
+            )
+        ]
+    )
     tool = make_public_search_tool(fake)  # type: ignore[arg-type]
     result = await tool.handler(query="q", max_results=3)
     assert fake.last_query == "q"
@@ -160,9 +159,7 @@ def test_register_default_tools_with_both_sources(tmp_path: Path) -> None:
         public_source=fake,  # type: ignore[arg-type]
         ideas=IdeasSource(tmp_path),
     )
-    owner = registry.tools_for(
-        AccessContext(tenant_id="default", role="owner")
-    )
+    owner = registry.tools_for(AccessContext(tenant_id="default", role="owner"))
     names = {t.name for t in owner}
     assert names == {fake.tool_name, IDEAS_TOOL_NAME}
 
@@ -172,11 +169,10 @@ def test_register_default_tools_without_ideas_means_no_private_tool() -> None:
     fake = _FakePublicSource()
     registry = ToolRegistry()
     register_default_tools(
-        registry, public_source=fake  # type: ignore[arg-type]
+        registry,
+        public_source=fake,  # type: ignore[arg-type]
     )
-    owner = registry.tools_for(
-        AccessContext(tenant_id="default", role="owner")
-    )
+    owner = registry.tools_for(AccessContext(tenant_id="default", role="owner"))
     names = {t.name for t in owner}
     assert fake.tool_name in names
     assert IDEAS_TOOL_NAME not in names
@@ -185,9 +181,7 @@ def test_register_default_tools_without_ideas_means_no_private_tool() -> None:
 def test_register_default_tools_only_ideas(tmp_path: Path) -> None:
     registry = ToolRegistry()
     register_default_tools(registry, ideas=IdeasSource(tmp_path))
-    owner = registry.tools_for(
-        AccessContext(tenant_id="default", role="owner")
-    )
+    owner = registry.tools_for(AccessContext(tenant_id="default", role="owner"))
     assert [t.name for t in owner] == [IDEAS_TOOL_NAME]
 
 
@@ -221,17 +215,19 @@ async def test_dispatch_logs_audit_record_on_success(tmp_path: Path) -> None:
     logger = AuditLogger(FileAuditSink(audit_path))
 
     fake = _FakePublicSource()
-    fake.returns([
-        SearchResult(
-            source_name="fake_public",
-            external_id="x",
-            title="T",
-            snippet="S",
-            authors=(),
-            published=None,
-            url="http://x",
-        )
-    ])
+    fake.returns(
+        [
+            SearchResult(
+                source_name="fake_public",
+                external_id="x",
+                title="T",
+                snippet="S",
+                authors=(),
+                published=None,
+                url="http://x",
+            )
+        ]
+    )
     tool = make_public_search_tool(fake)  # type: ignore[arg-type]
 
     result = await dispatch(

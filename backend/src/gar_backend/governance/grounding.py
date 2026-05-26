@@ -27,7 +27,6 @@ from dataclasses import dataclass
 
 from gar_backend.sources.base import SearchResult
 
-
 # `[source_name:external_id]` — source_name is ascii / digit / underscore /
 # hyphen; external_id excludes whitespace and `]`.
 CITATION_PATTERN = re.compile(r"\[([A-Za-z][A-Za-z0-9_-]*):([^\]\s]+)\]")
@@ -75,9 +74,7 @@ def validate(text: str, evidence: list[SearchResult]) -> GroundingReport:
     citations = extract_citations(text)
     evidence_keys = {(r.source_name, r.external_id) for r in evidence}
     unknown = tuple(
-        c
-        for c in citations
-        if (c.source_name, c.external_id) not in evidence_keys
+        c for c in citations if (c.source_name, c.external_id) not in evidence_keys
     )
     cited_keys = {(c.source_name, c.external_id) for c in citations}
     unused = tuple(

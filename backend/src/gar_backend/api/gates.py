@@ -38,7 +38,6 @@ from gar_backend.reports.builder import save_report
 from gar_backend.sources.base import PublicSource
 from gar_backend.state.runs import RunStore
 
-
 router = APIRouter(prefix="/runs/{run_id}/gates", tags=["gates"])
 
 
@@ -94,8 +93,12 @@ async def approve_concept_endpoint(
         raise HTTPException(409, str(exc)) from exc
     await store.save(new_state)
     return await _resume(
-        run_id=run_id, store=store, audit=audit, llm=llm,
-        access=access, public_source=public_source,
+        run_id=run_id,
+        store=store,
+        audit=audit,
+        llm=llm,
+        access=access,
+        public_source=public_source,
     )
 
 
@@ -113,15 +116,17 @@ async def select_sources_endpoint(
     if state is None:
         raise HTTPException(404, f"Run {run_id} not found")
     try:
-        new_state = select_sources(
-            state, adopted_source_ids=req.adopted_source_ids
-        )
+        new_state = select_sources(state, adopted_source_ids=req.adopted_source_ids)
     except InvalidTransition as exc:
         raise HTTPException(409, str(exc)) from exc
     await store.save(new_state)
     return await _resume(
-        run_id=run_id, store=store, audit=audit, llm=llm,
-        access=access, public_source=public_source,
+        run_id=run_id,
+        store=store,
+        audit=audit,
+        llm=llm,
+        access=access,
+        public_source=public_source,
     )
 
 

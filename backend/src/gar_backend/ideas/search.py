@@ -16,7 +16,6 @@ from gar_backend.ideas.reader import UnsupportedFileType, read
 from gar_backend.ideas.walker import walk
 from gar_backend.sources.base import SearchResult
 
-
 SOURCE_NAME = "ideas"
 SNIPPET_WINDOW = 100
 
@@ -30,9 +29,7 @@ class IdeasSource:
         self._vault = vault
         self._base = vault.parent if vault.is_file() else vault
 
-    async def search(
-        self, query: str, *, max_results: int = 10
-    ) -> list[SearchResult]:
+    async def search(self, query: str, *, max_results: int = 10) -> list[SearchResult]:
         terms = _tokenize(query)
         if not terms:
             return []

@@ -5,7 +5,6 @@ v1 skeleton — all stacks are empty shells. Resources will be added per spec §
 """
 
 import aws_cdk as cdk
-
 from stacks.auth_stack import AuthStack
 from stacks.backend_stack import BackendStack
 from stacks.data_stack import DataStack

@@ -12,10 +12,9 @@ sync-shaped so swapping in async sinks later is an explicit decision.
 import json
 import threading
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Protocol
-
 
 SCHEMA_VERSION = "1.0"
 
@@ -32,9 +31,7 @@ class AuditRecord:
     duration_ms: float | None = None
     status: str = "ok"
     error: str | None = None
-    timestamp: datetime = field(
-        default_factory=lambda: datetime.now(timezone.utc)
-    )
+    timestamp: datetime = field(default_factory=lambda: datetime.now(UTC))
 
 
 class AuditSink(Protocol):
@@ -52,9 +49,8 @@ class FileAuditSink:
 
     def write(self, payload: dict[str, Any]) -> None:
         line = json.dumps(payload, ensure_ascii=False, default=str) + "\n"
-        with self._lock:
-            with self._path.open("a", encoding="utf-8") as f:
-                f.write(line)
+        with self._lock, self._path.open("a", encoding="utf-8") as f:
+            f.write(line)
 
 
 class AuditLogger:
@@ -64,15 +60,17 @@ class AuditLogger:
         self._sink = sink
 
     def log(self, record: AuditRecord) -> None:
-        self._sink.write({
-            "schema_version": SCHEMA_VERSION,
-            "timestamp": record.timestamp.isoformat(),
-            "run_id": record.run_id,
-            "tenant_id": record.tenant_id,
-            "tool_name": record.tool_name,
-            "input": record.input,
-            "output": record.output,
-            "duration_ms": record.duration_ms,
-            "status": record.status,
-            "error": record.error,
-        })
+        self._sink.write(
+            {
+                "schema_version": SCHEMA_VERSION,
+                "timestamp": record.timestamp.isoformat(),
+                "run_id": record.run_id,
+                "tenant_id": record.tenant_id,
+                "tool_name": record.tool_name,
+                "input": record.input,
+                "output": record.output,
+                "duration_ms": record.duration_ms,
+                "status": record.status,
+                "error": record.error,
+            }
+        )

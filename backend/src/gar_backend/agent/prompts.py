@@ -12,7 +12,6 @@ Governance constraints are baked into each prompt (spec §2):
 - Never paste private idea content into web search (privacy seam)
 """
 
-
 DERIVE_CONCEPT_SYSTEM = """\
 You are a research assistant helping a researcher distill their unfinished
 private notes into a single coherent CONCEPT for a literature survey.

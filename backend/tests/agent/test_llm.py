@@ -36,9 +36,7 @@ def test_parse_response_extracts_tool_uses() -> None:
     ]
     raw.stop_reason = "tool_use"
     result = _parse_response(raw)
-    assert result.tool_uses == (
-        ToolUse(id="t1", name="some_tool", input={"q": "x"}),
-    )
+    assert result.tool_uses == (ToolUse(id="t1", name="some_tool", input={"q": "x"}),)
     assert result.text_blocks == ("thinking...",)
 
 
@@ -98,6 +96,10 @@ async def test_anthropic_llm_max_tokens_override() -> None:
 
     llm = AnthropicLLM(client=mock_client)
     await llm.complete(
-        system="", messages=[], tools=[], model="x", max_tokens=1000,
+        system="",
+        messages=[],
+        tools=[],
+        model="x",
+        max_tokens=1000,
     )
     assert mock_client.messages.create.await_args.kwargs["max_tokens"] == 1000

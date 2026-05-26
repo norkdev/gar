@@ -23,9 +23,7 @@ class RateLimitError(Exception):
     is in seconds if the provider returned one, else None.
     """
 
-    def __init__(
-        self, message: str, *, retry_after: float | None = None
-    ) -> None:
+    def __init__(self, message: str, *, retry_after: float | None = None) -> None:
         super().__init__(message)
         self.retry_after = retry_after
 
@@ -104,9 +102,7 @@ class AnthropicLLM:
                 model=model,
                 system=system,
                 max_tokens=max_tokens,
-                messages=[
-                    {"role": m.role, "content": m.content} for m in messages
-                ],
+                messages=[{"role": m.role, "content": m.content} for m in messages],
                 tools=[
                     {
                         "name": t.name,
@@ -117,9 +113,7 @@ class AnthropicLLM:
                 ],
             )
         except anthropic.RateLimitError as exc:
-            raise RateLimitError(
-                str(exc), retry_after=_parse_retry_after(exc)
-            ) from exc
+            raise RateLimitError(str(exc), retry_after=_parse_retry_after(exc)) from exc
         return _parse_response(response)
 
 
@@ -136,7 +130,7 @@ def _parse_retry_after(exc: anthropic.RateLimitError) -> float | None:
         return None
     try:
         return float(value)
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return None
 
 
@@ -147,9 +141,7 @@ def _parse_response(response: Any) -> LLMResponse:
         if block.type == "text":
             text_blocks.append(block.text)
         elif block.type == "tool_use":
-            tool_uses.append(
-                ToolUse(id=block.id, name=block.name, input=block.input)
-            )
+            tool_uses.append(ToolUse(id=block.id, name=block.name, input=block.input))
     return LLMResponse(
         text_blocks=tuple(text_blocks),
         tool_uses=tuple(tool_uses),

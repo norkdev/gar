@@ -22,10 +22,9 @@ def _parse_sse(raw: str) -> list[dict[str, Any]]:
             current["event"] = line[len("event: ") :]
         elif line.startswith("data: "):
             current["data"] = json.loads(line[len("data: ") :])
-        elif not line.strip():
-            if current:
-                events.append(current)
-                current = {}
+        elif not line.strip() and current:
+            events.append(current)
+            current = {}
     if current:
         events.append(current)
     return events
@@ -46,13 +45,9 @@ def test_stream_emits_initial_state_then_done_for_run_at_gate(
     run_id = create.json()["run_id"]
     # The run is now at awaiting_concept_approval. The SSE stream should
     # emit the initial state and then quickly terminate with `done`.
-    with api_setup["client"].stream(
-        "GET", f"/runs/{run_id}/events"
-    ) as response:
+    with api_setup["client"].stream("GET", f"/runs/{run_id}/events") as response:
         assert response.status_code == 200
-        assert response.headers["content-type"].startswith(
-            "text/event-stream"
-        )
+        assert response.headers["content-type"].startswith("text/event-stream")
         raw = "".join(response.iter_text())
 
     events = _parse_sse(raw)
@@ -95,16 +90,13 @@ def test_stream_emits_audit_events_already_in_log(
     with audit_path.open("a", encoding="utf-8") as f:
         f.write(json.dumps(extra) + "\n")
 
-    with api_setup["client"].stream(
-        "GET", f"/runs/{run_id}/events"
-    ) as response:
+    with api_setup["client"].stream("GET", f"/runs/{run_id}/events") as response:
         raw = "".join(response.iter_text())
 
     events = _parse_sse(raw)
     audit_events = [e for e in events if e["event"] == "audit"]
     assert any(
-        e["data"].get("tool_name") == "smoke.synthetic_event"
-        for e in audit_events
+        e["data"].get("tool_name") == "smoke.synthetic_event" for e in audit_events
     )
 
 
@@ -132,9 +124,7 @@ def test_stream_filters_audit_records_by_run_id(
     with api_setup["audit_path"].open("a", encoding="utf-8") as f:
         f.write(json.dumps(other) + "\n")
 
-    with api_setup["client"].stream(
-        "GET", f"/runs/{run_id}/events"
-    ) as response:
+    with api_setup["client"].stream("GET", f"/runs/{run_id}/events") as response:
         raw = "".join(response.iter_text())
 
     events = _parse_sse(raw)

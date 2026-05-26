@@ -6,14 +6,12 @@ behavior can be exercised deterministically by patching the module-level
 delay constants down to ~0.001 seconds.
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import httpx
 import pytest
-
 from gar_backend.sources import arxiv as arxiv_module
 from gar_backend.sources.arxiv import ArxivSource, _parse_feed
-
 
 FEED_TWO_ENTRIES = """<?xml version="1.0" encoding="UTF-8"?>
 <feed xmlns="http://www.w3.org/2005/Atom">
@@ -81,7 +79,7 @@ def test_parse_feed_extracts_authors_as_tuple_preserving_order() -> None:
 
 def test_parse_feed_published_is_timezone_aware_datetime() -> None:
     first, _ = _parse_feed(FEED_TWO_ENTRIES)
-    assert first.published == datetime(2023, 1, 15, tzinfo=timezone.utc)
+    assert first.published == datetime(2023, 1, 15, tzinfo=UTC)
 
 
 def test_parse_feed_url_uses_alternate_link_not_pdf() -> None:
@@ -121,9 +119,7 @@ def test_parse_feed_id_extraction_takes_last_path_segment() -> None:
 def _fast_arxiv(monkeypatch: pytest.MonkeyPatch) -> None:
     """Squash arXiv rate-limit + retry delays so tests run fast."""
     monkeypatch.setattr(arxiv_module, "ARXIV_RATE_LIMIT_SECONDS", 0.001)
-    monkeypatch.setattr(
-        arxiv_module, "ARXIV_RETRY_DELAYS", (0.001, 0.001, 0.001)
-    )
+    monkeypatch.setattr(arxiv_module, "ARXIV_RETRY_DELAYS", (0.001, 0.001, 0.001))
     monkeypatch.setattr(arxiv_module, "ARXIV_MAX_RETRY_DELAY", 0.001)
 
 

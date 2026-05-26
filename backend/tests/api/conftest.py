@@ -5,7 +5,6 @@ from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
-
 from gar_backend.agent.llm import LLMResponse, Message
 from gar_backend.api.deps import (
     get_access_context,
@@ -36,12 +35,14 @@ class StubLLM:
         model: str,
         max_tokens: int = 4096,
     ) -> LLMResponse:
-        self.calls.append({
-            "system": system,
-            "messages": messages,
-            "tools": tools,
-            "model": model,
-        })
+        self.calls.append(
+            {
+                "system": system,
+                "messages": messages,
+                "tools": tools,
+                "model": model,
+            }
+        )
         if not self.responses:
             raise RuntimeError("StubLLM out of canned responses")
         return self.responses.pop(0)

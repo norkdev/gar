@@ -5,7 +5,9 @@ from typing import Any
 from tests.api.conftest import text_response
 
 
-def test_create_run_returns_awaiting_concept_approval(api_setup: dict[str, Any]) -> None:
+def test_create_run_returns_awaiting_concept_approval(
+    api_setup: dict[str, Any],
+) -> None:
     api_setup["llm"].responses.append(text_response("derived concept"))
     response = api_setup["client"].post(
         "/runs", json={"vault_path": str(api_setup["vault"])}
@@ -19,7 +21,7 @@ def test_create_run_returns_awaiting_concept_approval(api_setup: dict[str, Any])
 
 
 def test_create_run_with_nonexistent_vault_returns_400(
-    api_setup: dict[str, Any]
+    api_setup: dict[str, Any],
 ) -> None:
     response = api_setup["client"].post(
         "/runs", json={"vault_path": "/does/not/exist/at/all"}

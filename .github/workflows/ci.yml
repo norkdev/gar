@@ -25,6 +25,12 @@ jobs:
       - name: Install backend dependencies
         run: uv sync --package gar-backend
 
+      - name: Ruff lint
+        run: uv run --package gar-backend ruff check backend/ infra/
+
+      - name: Ruff format check
+        run: uv run --package gar-backend ruff format --check backend/ infra/
+
       - name: Run pytest
         run: uv run --package gar-backend pytest backend/tests/ -q
 
@@ -44,6 +50,14 @@ jobs:
       - name: Install frontend dependencies
         working-directory: frontend
         run: npm ci
+
+      - name: ESLint
+        working-directory: frontend
+        run: npm run lint
+
+      - name: Prettier format check
+        working-directory: frontend
+        run: npm run format:check
 
       - name: Type-check + production build
         working-directory: frontend

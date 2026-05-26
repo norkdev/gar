@@ -12,7 +12,6 @@
 from datetime import date
 from pathlib import Path
 
-
 REPORT_PREFIX = "report"
 IGNORE_FILENAME = ".ignore"
 

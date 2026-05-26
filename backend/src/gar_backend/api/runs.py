@@ -29,7 +29,6 @@ from gar_backend.ideas.search import IdeasSource
 from gar_backend.sources.base import PublicSource
 from gar_backend.state.runs import RunStore
 
-
 router = APIRouter(prefix="/runs", tags=["runs"])
 
 

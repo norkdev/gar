@@ -80,4 +80,23 @@ validations, and retry events.
 - Infra: `uv add --package gar-infra <pkg>`
 - Frontend: `(cd frontend && npm install <pkg>)`
 
-No linter or formatter configured yet. When added (ruff for Python, ESLint+Prettier for TS likely), record the invocation here.
+### Lint / format
+
+Backend + infra (ruff config lives at the root `pyproject.toml`):
+
+```bash
+uv run --package gar-backend ruff check backend/ infra/         # lint
+uv run --package gar-backend ruff format backend/ infra/        # format in-place
+uv run --package gar-backend ruff format --check backend/ infra/   # CI mode
+```
+
+Frontend (ESLint flat config + Prettier):
+
+```bash
+(cd frontend && npm run lint)            # ESLint
+(cd frontend && npm run format)          # Prettier write
+(cd frontend && npm run format:check)    # CI mode
+```
+
+All four checks run in CI on every push and PR; the workflow lives at
+`.github/workflows/ci.yml`.
