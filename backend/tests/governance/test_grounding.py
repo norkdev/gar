@@ -77,7 +77,7 @@ def test_extract_citations_accepts_underscored_source_name() -> None:
 
 
 def test_validate_all_citations_match_evidence_is_valid() -> None:
-    text = "claim [public_src:1.1] another [public_src:2.2]."
+    text = "statement [public_src:1.1] another [public_src:2.2]."
     evidence = [_sr("public_src", "1.1"), _sr("public_src", "2.2")]
     report = validate(text, evidence)
     assert report.is_valid
@@ -86,7 +86,7 @@ def test_validate_all_citations_match_evidence_is_valid() -> None:
 
 
 def test_validate_unknown_citation_flagged_and_invalid() -> None:
-    text = "Bogus claim [public_src:9.9.9]."
+    text = "Bogus statement [public_src:9.9.9]."
     evidence = [_sr("public_src", "1.1")]
     report = validate(text, evidence)
     assert not report.is_valid
@@ -120,7 +120,7 @@ def test_validate_unused_evidence_empty_when_all_cited() -> None:
 
 def test_validate_source_name_must_match_in_citation() -> None:
     """A citation with the right id but wrong source_name is treated as unknown."""
-    text = "[public_src:note.md]"  # claim it's public_src, evidence is from ideas
+    text = "[public_src:note.md]"  # asserts source=public_src, but evidence is from ideas
     evidence = [_sr("ideas", "note.md")]
     report = validate(text, evidence)
     assert not report.is_valid

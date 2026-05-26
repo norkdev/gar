@@ -40,7 +40,7 @@ export function ConceptReview({
       <h1>Gate 1 — Concept review</h1>
       <p className="muted">
         The agent derived this concept from your notes. Edit it if needed.
-        Approving triggers the prior-art search (typically 1–3 minutes).
+        Approving triggers the related-work search (typically 1–3 minutes).
       </p>
 
       <textarea
@@ -55,7 +55,7 @@ export function ConceptReview({
       <p style={{ marginTop: '1rem' }}>
         <button onClick={submit} disabled={busy}>
           {busy
-            ? 'Searching prior art…'
+            ? 'Searching related work…'
             : draft === initial
               ? 'Approve & search'
               : 'Approve edits & search'}

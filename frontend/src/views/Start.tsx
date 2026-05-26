@@ -24,11 +24,11 @@ export function Start({ onStarted }: { onStarted: (s: RunState) => void }) {
 
   return (
     <main>
-      <h1>Governed Agentic Retrieval — Prior-Art Survey</h1>
+      <h1>Guided Agentic Retrieval — Literature Survey</h1>
       <p className="muted">
         Point this at a folder of Markdown idea notes (an Obsidian vault or a
         sub-folder), or a single .md file. The agent will derive a concept and
-        survey public literature for related prior art.
+        survey public literature for related work.
       </p>
 
       <h2>Idea source</h2>

@@ -1,54 +1,64 @@
-# GAR — Governed Agentic Retrieval for Prior-Art Survey
+# GAR — Guided Agentic Retrieval for Literature Survey
 
-A small, runnable codebase that helps a researcher or engineer survey public
-literature against their own unpublished ideas — and stops there. The
-agent surfaces the closest prior work with citations the user can inspect.
-It does **not** decide whether the user's idea is novel or non-obvious.
-That judgement is a legal and scholarly question; humans keep it.
+A small, runnable codebase that helps a researcher or engineer survey
+published literature against their own in-progress idea — and stops there.
+The agent surfaces the closest related work with citations the user can
+inspect. It does **not** decide whether the idea is novel or its
+contribution genuine. That judgement depends on what the literature
+actually shows and on how the user scopes their own contribution; the
+human keeps it.
 
 The system is dynamic — the LLM plans tool use, calls retrieval, reasons
 over results, decides whether to keep going — but every link in that chain
 runs under a **governance layer** that the implementation makes visible. The
 codebase is structured so a reader can find and reason about each governance
-mechanism on its own.
+mechanism on its own. "Guided" sits at the surface because the agent is
+not fully autonomous; "governance" describes how that guidance is enforced
+inside.
 
-> Status: v1 backend complete; 207 unit / integration tests passing; end-to-end
-> smoke runs against the live arXiv API and the Anthropic Claude API have
-> produced complete, cited reports. Frontend is a minimal React/TypeScript
-> shell. AWS deployment scaffolding (CDK) is wired but resources are stubs.
+> Status: v1 backend complete; 221 unit / integration tests passing;
+> end-to-end smoke runs against the live arXiv API and the Anthropic
+> Claude API have produced complete, cited reports. Frontend is a minimal
+> React/TypeScript shell with a rendered Markdown preview. AWS deployment
+> scaffolding (CDK) is wired but resources are stubs.
 
 ---
 
 ## Why this exists (the design judgements)
 
-This is a personal project, intentionally narrow. Each non-obvious choice
+This is a personal project, intentionally narrow. Each non-trivial choice
 has a reason:
 
 ### Why an agent loop, not a fixed retrieve→generate pipeline
 
-Prior-art survey isn't a single keyword search. A useful query depends on
-what the previous query returned; a useful adjustment depends on what the
-LLM made of the result; sometimes the right move is to re-read the user's
-notes, sometimes it's to broaden the search. A fixed pipeline encodes the
-shape of "what to do next" up front; an agent loop lets the LLM decide
-step by step. The same code path can survey one note or a 200-note vault.
+A literature survey isn't a single keyword search. A useful query depends
+on what the previous query returned; a useful adjustment depends on what
+the LLM made of the result; sometimes the right move is to re-read the
+user's notes, sometimes it's to broaden the search. A fixed pipeline
+encodes the shape of "what to do next" up front; an agent loop lets the
+LLM decide step by step. The same code path can survey one note or a
+200-note vault.
 
 The loop lives in `backend/src/gar_backend/agent/loop.py`. It's three pure
 phase functions plus an orchestrator that drives them through HITL gates.
 
-### Why the agent prepares material, not a verdict
+### Why the agent prepares material, not a judgement
 
-Novelty and inventive step are determinations that depend on legal context
-(jurisdiction, claim construction) and scholarly judgement. An LLM that
-asserts "this is novel" is at best confidently wrong and at worst dangerous
-to the user — they might quote it in a filing.
+Deciding whether an idea is genuinely new — and whether its contribution
+matters — is exactly the kind of question the human writing the paper or
+proposal needs to own. The judgement depends on how the user frames their
+contribution, what slice of the literature they consider authoritative,
+and what position they intend to state publicly. An LLM that asserts
+"this is novel" is at best confidently wrong and at worst dangerous to
+the user — they might quote it in their paper or grant proposal and find
+themselves defending an assertion the model invented.
 
 So the system is shaped to **not** say that. The compose-report prompt
-explicitly requires hedged language ("the most similar candidate is X; the
-main differentiator appears to be Y") and forbids verdict statements. The
-HITL gates force the human into the loop at exactly the moments where a
-verdict would otherwise emerge: after the candidates are gathered, and
-before the report is saved.
+explicitly requires hedged language ("the most similar candidate is X;
+the main differentiator appears to be Y") and forbids final judgement
+statements. The HITL gates force the human into the loop at exactly the
+moments where a judgement would otherwise emerge: after the candidates
+are gathered, and before the report is saved.
 
 This isn't safety theatre — it changes what the system is for.
 
@@ -59,7 +69,7 @@ report is worse than useless: it leads the user toward an interpretation
 they can't verify. So grounding is enforced as a code-level invariant, not
 a prompt nicety:
 
-- Every claim about a paper must carry an `[source_name:external_id]`
+- Every statement about a paper must carry an `[source_name:external_id]`
   citation that exists in the retrieved evidence set (see
   `governance/grounding.py`).
 - After the LLM composes the final report, a validator parses it and
@@ -77,13 +87,14 @@ re-prompt produced a fully-valid report on attempt 2.
 
 ### Why public and private sources are physically separated
 
-Novelty is a function of public knowledge. The user's unpublished notes
-are not public. If the agent ever quoted them outside the local process —
-e.g., to a web-search API — the user would self-destroy the novelty they
-were trying to protect. So the codebase keeps the two sources in separate
-packages (`sources/` for public; `ideas/` for private), routes them through
-separate tool registries (see `governance/rbac.py`), and the search prompt
-contains an explicit rule against passing private content to web search.
+A literature survey is meaningful only against the public record. The
+user's unpublished notes are not public. If the agent ever quoted them
+outside the local process — e.g., to a web-search API — the user would
+leak the very ideas they were trying to refine in private. So the
+codebase keeps the two sources in separate packages (`sources/` for
+public; `ideas/` for private), routes them through separate tool
+registries (see `governance/rbac.py`), and the search prompt contains
+an explicit rule against passing private content to web search.
 
 The same RBAC machinery means **the private tool is structurally absent**
 from the LLM's tool list when the caller's role doesn't have private
@@ -115,7 +126,7 @@ to understand what the agent actually did on a given run reads
 ```
 ┌─────────────────────┐         ┌──────────────────────────────────────┐
 │ Vite + React + TS   │  HTTP   │ FastAPI                              │
-│ (4 views, SSE feed) │ ◄────►  │  ├─ api/        REST + SSE endpoints │
+│ (5 views, SSE feed) │ ◄────►  │  ├─ api/        REST + SSE endpoints │
 └─────────────────────┘         │  ├─ agent/      LLM client + loop    │
                                 │  ├─ governance/ audit/hitl/grounding │
                                 │  │                /rbac              │
@@ -132,8 +143,8 @@ to understand what the agent actually did on a given run reads
                                   back-off)
 ```
 
-- **Frontend**: 4 views routed by `RunState.status`; SSE during long POSTs
-  for live activity feed.
+- **Frontend**: 5 views routed by `RunState.status`; SSE during long POSTs
+  for live activity feed; the final report renders as Markdown.
 - **Backend**: agent loop runs synchronously within each gate POST; state
   persists across requests via `RunStore` (in-memory in v1).
 - **Public source**: arXiv via its public API. The implementation is
@@ -183,7 +194,7 @@ direction the data already supports.
 - Let the user edit the concept, select adopted candidates, and approve
   the final report.
 - Compose a structured Markdown report with required sections (concept,
-  referenced notes, similar prior art, hedged assessment, development
+  referenced notes, similar related work, hedged assessment, development
   suggestions, references split into adopted vs not).
 - Save the report with a date-based filename (suffix on same-day reruns),
   never overwriting, and append the filename to `.ignore`.
@@ -266,7 +277,7 @@ so the page can use relative URLs.
 ### Tests
 
 ```bash
-uv run --package gar-backend pytest backend/tests/   # 207 tests
+uv run --package gar-backend pytest backend/tests/   # 221 tests
 (cd frontend && npm run build)                       # type-check + bundle
 ```
 
@@ -302,7 +313,8 @@ backend/src/gar_backend/
 │   └── search.py       keyword search returning SearchResult
 ├── reports/
 │   ├── naming.py       date-based filenames + .ignore accounting
-│   └── builder.py      save composed report to vault
+│   ├── builder.py      save composed report to vault
+│   └── linkify.py      turn citations into Markdown links
 └── state/
     └── runs.py         RunStore Protocol + InMemoryRunStore
 
@@ -315,7 +327,7 @@ frontend/src/
                         FinalReport / Completed / Activity (SSE feed)
 
 infra/                  AWS CDK (Python) — 5 stacks, currently scaffolded
-backend/tests/          207 tests, mirrors src/ layout
+backend/tests/          221 tests, mirrors src/ layout
 spec.md                 Working spec (Japanese)
 implementation_brief.md Original input contract (Japanese)
 CLAUDE.md               Notes for Claude Code working in this repo
@@ -329,7 +341,8 @@ CLAUDE.md               Notes for Claude Code working in this repo
   its [Terms of Use](https://info.arxiv.org/help/api/tou.html). The
   retrieval client respects the documented "no more than one request
   every three seconds, and a single connection at a time" limit and
-  applies a 3 → 6 → 12-second exponential back-off on HTTP 429.
+  applies a 3 → 6 → 12-second exponential back-off on HTTP 429 and on
+  read timeouts.
 - LLM inference is via the Anthropic Claude API.
 - This is a personal project. No employer code, customer data, or
   internal know-how is in this repository.

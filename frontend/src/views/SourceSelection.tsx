@@ -59,7 +59,7 @@ export function SourceSelection({
 
   return (
     <main>
-      <h1>Gate 2 — Adopt prior art</h1>
+      <h1>Gate 2 — Adopt related work</h1>
       <p className="muted">
         {candidates.length} candidate{candidates.length === 1 ? '' : 's'} found.
         Check the ones to adopt into the final report. You can adopt zero —

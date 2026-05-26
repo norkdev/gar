@@ -18,23 +18,23 @@ Public-facing design narrative lives in `README.md`; design constraints / non-ne
 
 Summary of the non-negotiables `spec.md` establishes (see the file for full detail):
 
-- **What's being built:** a *Governed Agentic Retrieval* agent for prior-art survey — it helps a researcher compare public literature against their own unpublished ideas to scope novelty, but **never decides novelty itself**. The agent presents grounded candidates; the human judges.
-- **Hard separation between public sources and private (unpublished) ideas.** Mixing them defeats the purpose and risks leaking the user's private ideas into a public-knowledge context (which would self-destroy novelty).
+- **What's being built:** *Guided Agentic Retrieval* for literature survey — it helps a researcher compare published literature against their own in-progress idea, but **never decides novelty or contribution itself**. The agent presents grounded candidates; the human judges. ("Guided" is the surface label; the four governance mechanisms below are how that guidance is enforced internally.)
+- **Hard separation between public sources and private (unpublished) ideas.** Mixing them defeats the purpose and risks leaking the user's private ideas into a public-knowledge context (which would compromise the originality they're working to refine).
 - **Governance layer — four pillars that must show up in the implementation, not just the README:**
-  1. **Grounding required** — every claim cites a retrieved source; if it can't be cited, the agent must say so rather than fabricate.
+  1. **Grounding required** — every statement about a paper cites a retrieved source; if it can't be cited, the agent must say so rather than fabricate.
   2. **Human-in-the-loop approval** — gating access to private ideas, any external transmission, and any comparative conclusion.
   3. **Audit log** — every tool call recorded (what, when, which source) so a run can be replayed.
   4. **Role-based access** — private-idea tools must be *invisible/uncallable* to non-owner roles, not just refused at call time.
 - **Agent loop**, not a fixed retrieve→generate pipeline. The LLM plans tool use, executes, accumulates results, decides whether to keep going.
-- **Retrieval sources behind one abstract interface** so a patent-DB source could be slotted in later. Patent-API support is *Future Work* — leave the seam, don't build it.
+- **Retrieval sources behind one abstract interface** so further specialised databases (PubMed, Semantic Scholar, Crossref, ...) can be slotted in later. Additional public sources are *Future Work* — leave the seam, don't build it.
 - **Retrieval techniques (semantic search, rerank, keyword) are tools inside the loop**, not a fixed stack — leave room to compare them in a later evaluation phase.
-- **v1 scope is tight on purpose** — see `spec.md §11`. Private side is Markdown-only; public side (arXiv) takes title + abstract + metadata only. PDF parsing, images, additional public sources, patent API, multi-tenant runtime, Bedrock LLM, per-tenant CMK are all **Future Work** with explicit seams (interfaces / config slots) but no implementation.
+- **v1 scope is tight on purpose** — see `spec.md §11`. Private side is Markdown-only; public side (arXiv) takes title + abstract + metadata only. PDF parsing, images, additional public sources, multi-tenant runtime, Bedrock LLM, per-tenant CMK are all **Future Work** with explicit seams (interfaces / config slots) but no implementation.
 - **Source identifiers are kept generic.** The public-source interface (`PublicSource` Protocol in `sources/base.py`) carries `name` / `tool_name` / `tool_description` as class attributes; the agent loop never hard-codes any specific source. `arxiv` appears only inside `sources/arxiv.py`, its tests, and the one wiring line in `api/deps.py` that selects which concrete `PublicSource` to instantiate. Adding a second public source is a localized change (new file, edit one line in `deps.py`, register).
 - **Architecture is React + FastAPI + AWS** — Vite + React + TypeScript frontend (static on S3+CloudFront), FastAPI on Lambda+Function URLs via Mangum, Step Functions for agent orchestration with wait-for-callback for HITL gates, DynamoDB for state/checkpoint, S3 for audit log (JSONL) and private content and search cache. No VPC / NAT Gateway in v1.
 - **Seven scale seams from v1** (spec.md §10): `tenant_id` on every record, UI never calls AWS directly, agent state mirrored to DynamoDB, HITL as durable state, LLM client abstracted (Anthropic↔Bedrock-swappable), `schema_version` on audit logs, auth check at the API boundary (stub today).
 - **Personal project, public repo.** No employer code, customer data, or internal know-how may enter this repo. Credentials stay out of git.
 
-When a design choice is ambiguous, defer to the brief's intent over convenience. The README is expected to **explain the design judgments** (why agent loop, why no AI verdict, how each governance pillar is realized, retrieval-technique tradeoffs, limits, Future Work) — keep notes as you build so this can be written without archeology later.
+When a design choice is ambiguous, defer to the brief's intent over convenience. The README is expected to **explain the design judgments** (why agent loop, why the agent prepares material rather than a judgement, how each governance pillar is realized, retrieval-technique tradeoffs, limits, Future Work) — keep notes as you build so this can be written without archeology later.
 
 ## Environment & commands
 

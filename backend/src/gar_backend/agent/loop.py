@@ -201,7 +201,7 @@ async def phase_search(state: RunState, ctx: AgentContext) -> RunState:
                 "type": "text",
                 "text": (
                     f"Concept to investigate:\n{concept}\n\n"
-                    "Search for prior art using the available tools. When "
+                    "Search for related work using the available tools. When "
                     "you have a reasonable shortlist, stop calling tools."
                 ),
             }],
@@ -363,7 +363,7 @@ async def phase_compose_report(
                     "Rewrite the entire report. Replace each unknown citation "
                     "with either a valid citation from the list (in the exact "
                     "[source_name:external_id] form) or '(citation not "
-                    "available)' if the claim cannot be supported by an "
+                    "available)' if the statement cannot be supported by an "
                     "adopted source."
                 ),
             }],

@@ -1,4 +1,4 @@
-"""Validator: every claim cites a retrieved source.
+"""Validator: every assertion cites a retrieved source.
 
 Citations follow the format ``[source_name:external_id]``. The validator
 parses these from text and checks them against a list of ``SearchResult``

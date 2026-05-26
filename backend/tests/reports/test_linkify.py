@@ -12,18 +12,18 @@ def _evidence(*entries: tuple[str, str, str]) -> list[dict]:
 
 
 def test_citation_with_known_url_becomes_external_link() -> None:
-    report = "Prior work [arxiv:1.1] is relevant."
+    report = "Related work [arxiv:1.1] is relevant."
     out = linkify_report(
         report, _evidence(("arxiv", "1.1", "https://arxiv.org/abs/1.1"))
     )
     # Linkified form is present; the original un-escaped citation is gone.
     assert r"\[[arxiv:1.1](https://arxiv.org/abs/1.1)\]" in out
-    assert "[arxiv:1.1] is" not in out  # un-escaped form removed
+    assert "[arxiv:1.1] is " not in out  # un-escaped form removed
 
 
 def test_citation_appearing_in_body_and_references_both_get_linkified() -> None:
     report = (
-        "Claim [arxiv:1.1] supported by prior work.\n\n"
+        "Statement [arxiv:1.1] supported by related work.\n\n"
         "## 6. References\n\n- [arxiv:1.1] — Description."
     )
     out = linkify_report(
@@ -34,13 +34,13 @@ def test_citation_appearing_in_body_and_references_both_get_linkified() -> None:
 
 def test_citation_without_evidence_kept_as_plain_text() -> None:
     """An unrelated `[foo:99]` in the body has no URL to link to and stays as-is."""
-    report = "Claim [foo:99] not in evidence."
+    report = "Statement [foo:99] not in evidence."
     out = linkify_report(report, [])
     assert out == report  # unchanged
 
 
 def test_citation_with_evidence_but_empty_url_kept_as_plain_text() -> None:
-    report = "Claim [arxiv:1.1] with no URL."
+    report = "Statement [arxiv:1.1] with no URL."
     out = linkify_report(report, _evidence(("arxiv", "1.1", "")))
     assert out == report
 
@@ -51,7 +51,7 @@ def test_returns_unmodified_when_no_citations_present() -> None:
 
 
 def test_multiple_distinct_citations_all_linkified() -> None:
-    report = "Two claims: [arxiv:1.1] and [arxiv:2.2]."
+    report = "Two statements: [arxiv:1.1] and [arxiv:2.2]."
     out = linkify_report(
         report,
         _evidence(
