@@ -191,6 +191,31 @@ direction the data already supports.
 
 ---
 
+## Two clients, two ideas-source implementations
+
+The same agent loop is reachable two ways, and the *ideas* (private
+notes) source has two interchangeable implementations behind one shape:
+
+| Client | Ideas source impl | What the backend sees | Where the report goes |
+|---|---|---|---|
+| **CLI** (`gar /path/to/vault`) | `IdeasSource` — walks the filesystem, honors `.gitignore` + `.ignore`, returns `file://` URLs | A vault path it can read | Saved to the vault folder; filename appended to `.ignore` |
+| **Web UI** (Vite + React picker) | `InMemoryIdeasSource` — operates on note contents POSTed from the browser | An array of `(path, content)` pairs | The user downloads / copies from the UI; no backend filesystem access |
+
+Both implementations satisfy the same duck-typed surface (`.name`,
+`.list_all()`, `.search()`). The agent loop, audit log, HITL gates,
+grounding validator, and RBAC layer don't know or care which one is
+mounted. The choice is made at the API boundary based on which field
+the `POST /runs` request carries (`vault_path` vs `notes_content`).
+
+This is *why* two seem-similar code paths exist: the CLI gives a
+filesystem-rooted local workflow (with vault write-back and ignore
+accounting); the Web UI gives a backend-agnostic workflow that works
+identically against a future AWS-deployed backend or an Obsidian plugin
+talking to either. The shared agent loop and governance layer ensure
+the two surfaces stay behavior-equivalent without parallel maintenance.
+
+---
+
 ## Scope of v1
 
 ### Does
@@ -282,10 +307,31 @@ The backend writes its audit log to `./audit.jsonl` (gitignored). The
 frontend's Vite dev server proxies `/runs` and `/healthz` to the backend
 so the page can use relative URLs.
 
+### CLI — local-mode shortcut
+
+For terminal users who don't want a browser in the loop:
+
+```bash
+uv run --package gar-backend gar /path/to/vault
+```
+
+`gar` walks the vault on the local filesystem, drives the same agent
+loop, and prompts at each HITL gate (concept review / source selection
+/ report approval) as terminal interactions. Concept editing opens
+`$EDITOR`; the final approved report is written into the vault folder
+with the filename appended to `.ignore` (same behavior as the original
+local-mode HTTP flow).
+
+The browser UI uses the *content-upload* path instead (no filesystem
+access on the backend side) and exists alongside the CLI; the agent
+loop and governance layer are shared. See
+[Two clients, two ideas-source implementations](#two-clients-two-ideas-source-implementations)
+below.
+
 ### Tests
 
 ```bash
-uv run --package gar-backend pytest backend/tests/   # 221 tests
+uv run --package gar-backend pytest backend/tests/   # 246 tests
 (cd frontend && npm run build)                       # type-check + bundle
 ```
 

@@ -12,6 +12,9 @@ dependencies = [
     "python-dotenv",
 ]
 
+[project.scripts]
+gar = "gar_backend.cli:main"
+
 [dependency-groups]
 dev = [
     "pytest",

@@ -59,8 +59,8 @@ export function FinalReport({
       <Stepper status={state.status} />
       <h1>Final report</h1>
       <p className="muted">
-        Review the report below. Approving saves it as a Markdown file in your vault and appends the
-        filename to <code>.ignore</code> so re-runs skip it.
+        Review the report below. Use Copy or Download to keep the Markdown locally, then Approve
+        &amp; finish to close the run.
       </p>
 
       <div className="tabs">
@@ -112,7 +112,7 @@ export function FinalReport({
 
       <div className="row" style={{ marginTop: "var(--sp-5)" }}>
         <button onClick={submit} disabled={busy}>
-          {busy ? "Saving…" : "Approve & save"}
+          {busy ? "Finishing…" : "Approve & finish"}
         </button>
       </div>
     </main>

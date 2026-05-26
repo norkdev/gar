@@ -298,6 +298,10 @@ textarea {
   appearance: none;
   width: 18px;
   height: 18px;
+  /* Reset the global input rule that adds left/right padding — otherwise
+   * the 18×18 box ends up wider than tall under box-sizing: border-box. */
+  padding: 0;
+  box-sizing: border-box;
   margin: 2px var(--sp-3) 0 0;
   border: 1.5px solid var(--color-border-strong);
   border-radius: var(--radius-sm);
