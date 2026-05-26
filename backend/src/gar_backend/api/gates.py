@@ -1,0 +1,149 @@
+"""HTTP routes for HITL gate responses.
+
+POST /runs/{id}/gates/concept   — gate 1: approve (optionally edit) the concept
+POST /runs/{id}/gates/sources   — gate 2: select adopted sources
+POST /runs/{id}/gates/report    — gate 3: approve final report (saves to disk)
+
+After each gate transition, the agent loop resumes until the next gate or
+terminal state. Errors:
+- 404 if the run does not exist
+- 409 if the run is not in the expected status for the gate
+"""
+
+from pathlib import Path
+from typing import Any
+
+from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel
+
+from gar_backend.agent.llm import LLMClient
+from gar_backend.agent.loop import run_until_gate
+from gar_backend.api.deps import (
+    get_access_context,
+    get_audit_logger,
+    get_llm_client,
+    get_public_source,
+    get_run_store,
+)
+from gar_backend.api.runs import build_agent_context, serialize_state
+from gar_backend.governance.audit import AuditLogger
+from gar_backend.governance.hitl import (
+    InvalidTransition,
+    approve_concept,
+    approve_report,
+    select_sources,
+)
+from gar_backend.governance.rbac import AccessContext
+from gar_backend.reports.builder import save_report
+from gar_backend.sources.base import PublicSource
+from gar_backend.state.runs import RunStore
+
+
+router = APIRouter(prefix="/runs/{run_id}/gates", tags=["gates"])
+
+
+class ApproveConceptRequest(BaseModel):
+    edited_concept: str | None = None
+
+
+class SelectSourcesRequest(BaseModel):
+    adopted_source_ids: list[str]
+
+
+async def _resume(
+    *,
+    run_id: str,
+    store: RunStore,
+    audit: AuditLogger,
+    llm: LLMClient,
+    access: AccessContext,
+    public_source: PublicSource,
+) -> dict[str, Any]:
+    state = await store.get(run_id)
+    if state is None:
+        raise HTTPException(404, f"Run {run_id} disappeared during transition")
+    vault_path = Path(state.context["vault_path"])
+    ctx = build_agent_context(
+        vault_path=vault_path,
+        store=store,
+        audit=audit,
+        llm=llm,
+        access=access,
+        public_source=public_source,
+    )
+    final = await run_until_gate(run_id=run_id, ctx=ctx)
+    return serialize_state(final)
+
+
+@router.post("/concept")
+async def approve_concept_endpoint(
+    run_id: str,
+    req: ApproveConceptRequest,
+    store: RunStore = Depends(get_run_store),
+    audit: AuditLogger = Depends(get_audit_logger),
+    llm: LLMClient = Depends(get_llm_client),
+    access: AccessContext = Depends(get_access_context),
+    public_source: PublicSource = Depends(get_public_source),
+) -> dict[str, Any]:
+    state = await store.get(run_id)
+    if state is None:
+        raise HTTPException(404, f"Run {run_id} not found")
+    try:
+        new_state = approve_concept(state, edited_concept=req.edited_concept)
+    except InvalidTransition as exc:
+        raise HTTPException(409, str(exc)) from exc
+    await store.save(new_state)
+    return await _resume(
+        run_id=run_id, store=store, audit=audit, llm=llm,
+        access=access, public_source=public_source,
+    )
+
+
+@router.post("/sources")
+async def select_sources_endpoint(
+    run_id: str,
+    req: SelectSourcesRequest,
+    store: RunStore = Depends(get_run_store),
+    audit: AuditLogger = Depends(get_audit_logger),
+    llm: LLMClient = Depends(get_llm_client),
+    access: AccessContext = Depends(get_access_context),
+    public_source: PublicSource = Depends(get_public_source),
+) -> dict[str, Any]:
+    state = await store.get(run_id)
+    if state is None:
+        raise HTTPException(404, f"Run {run_id} not found")
+    try:
+        new_state = select_sources(
+            state, adopted_source_ids=req.adopted_source_ids
+        )
+    except InvalidTransition as exc:
+        raise HTTPException(409, str(exc)) from exc
+    await store.save(new_state)
+    return await _resume(
+        run_id=run_id, store=store, audit=audit, llm=llm,
+        access=access, public_source=public_source,
+    )
+
+
+@router.post("/report")
+async def approve_report_endpoint(
+    run_id: str,
+    store: RunStore = Depends(get_run_store),
+    access: AccessContext = Depends(get_access_context),
+) -> dict[str, Any]:
+    state = await store.get(run_id)
+    if state is None:
+        raise HTTPException(404, f"Run {run_id} not found")
+    try:
+        new_state = approve_report(state)
+    except InvalidTransition as exc:
+        raise HTTPException(409, str(exc)) from exc
+
+    report_content = state.pending_payload.get("report", "")
+    vault_path = Path(state.context["vault_path"])
+    saved_path = save_report(content=report_content, vault_path=vault_path)
+
+    await store.save(new_state)
+    response = serialize_state(new_state)
+    response["saved_path"] = str(saved_path)
+    return response

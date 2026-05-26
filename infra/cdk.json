@@ -1,0 +1,11 @@
+{
+  "app": "python app.py",
+  "watch": {
+    "exclude": [
+      "**/__pycache__",
+      "**/.venv/**",
+      "*.egg-info"
+    ]
+  },
+  "context": {}
+}

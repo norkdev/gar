@@ -1,0 +1,163 @@
+/* Minimal styling — structure first, polish later. */
+* {
+  box-sizing: border-box;
+}
+body {
+  font-family: system-ui, -apple-system, sans-serif;
+  margin: 0;
+  background: #f7f7f8;
+  color: #222;
+}
+main {
+  max-width: 880px;
+  margin: 2rem auto;
+  padding: 2rem;
+  background: white;
+  border-radius: 8px;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.08);
+}
+h1 {
+  margin-top: 0;
+  font-size: 1.4rem;
+}
+h2 {
+  margin-top: 1.5rem;
+  font-size: 1.1rem;
+  color: #444;
+}
+button {
+  font-size: 0.95rem;
+  padding: 0.5rem 1rem;
+  border: 1px solid #1a73e8;
+  background: #1a73e8;
+  color: white;
+  border-radius: 4px;
+  cursor: pointer;
+}
+button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+button.secondary {
+  background: white;
+  color: #444;
+  border-color: #ccc;
+}
+input,
+textarea {
+  font-family: inherit;
+  font-size: 0.95rem;
+  width: 100%;
+  padding: 0.5rem;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+}
+textarea {
+  resize: vertical;
+  min-height: 8rem;
+}
+.muted {
+  color: #777;
+  font-size: 0.85rem;
+}
+.error {
+  color: #b00020;
+  background: #fdecea;
+  padding: 0.75rem;
+  border-radius: 4px;
+  margin: 1rem 0;
+}
+.candidate {
+  border: 1px solid #e0e0e0;
+  padding: 0.75rem;
+  margin-bottom: 0.5rem;
+  border-radius: 4px;
+}
+.candidate.adopted {
+  border-color: #1a73e8;
+  background: #f0f7ff;
+}
+.activity {
+  background: #f4f4f5;
+  border: 1px solid #e0e0e0;
+  border-radius: 4px;
+  padding: 0.75rem;
+  margin-top: 1rem;
+  max-height: 14rem;
+  overflow-y: auto;
+  font-family: ui-monospace, monospace;
+  font-size: 0.8rem;
+}
+.activity-line {
+  padding: 0.15rem 0;
+  border-bottom: 1px dotted #ddd;
+}
+.activity-line:last-child {
+  border-bottom: none;
+}
+pre.report {
+  background: #f9f9f9;
+  border: 1px solid #e0e0e0;
+  padding: 1rem;
+  border-radius: 4px;
+  white-space: pre-wrap;
+  font-family: ui-monospace, monospace;
+  font-size: 0.85rem;
+  max-height: 32rem;
+  overflow-y: auto;
+}
+.report-rendered {
+  background: #fdfdfe;
+  border: 1px solid #e0e0e0;
+  padding: 1.2rem 1.5rem;
+  border-radius: 4px;
+  max-height: 36rem;
+  overflow-y: auto;
+  font-size: 0.92rem;
+  line-height: 1.55;
+}
+.report-rendered h1 {
+  font-size: 1.25rem;
+  margin: 1rem 0 0.6rem;
+}
+.report-rendered h2 {
+  font-size: 1.05rem;
+  margin: 1.4rem 0 0.5rem;
+  padding-top: 0.4rem;
+  border-top: 1px solid #eee;
+  color: #222;
+}
+.report-rendered h3 {
+  font-size: 0.98rem;
+  margin: 1rem 0 0.4rem;
+  color: #333;
+}
+.report-rendered p {
+  margin: 0.5rem 0;
+}
+.report-rendered ul,
+.report-rendered ol {
+  margin: 0.4rem 0;
+  padding-left: 1.5rem;
+}
+.report-rendered li {
+  margin: 0.2rem 0;
+}
+.report-rendered a {
+  color: #1a73e8;
+  text-decoration: none;
+}
+.report-rendered a:hover {
+  text-decoration: underline;
+}
+.report-rendered code {
+  background: #f0f0f0;
+  padding: 0.05rem 0.3rem;
+  border-radius: 3px;
+  font-size: 0.85em;
+}
+.report-rendered hr {
+  border: none;
+  border-top: 1px solid #eee;
+  margin: 1rem 0;
+}
