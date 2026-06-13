@@ -19,9 +19,9 @@ from gar_backend.agent.loop import AgentContext, create_run, run_until_gate
 from gar_backend.agent.tools import register_default_tools
 from gar_backend.api.deps import (
     get_access_context,
-    get_audit_logger,
     get_llm_client,
     get_public_source,
+    get_request_audit_logger,
     get_run_store,
 )
 from gar_backend.governance.audit import AuditLogger
@@ -124,7 +124,7 @@ def ideas_source_for_state(state: RunState) -> IdeasSource | InMemoryIdeasSource
 async def create_run_endpoint(
     req: CreateRunRequest,
     store: RunStore = Depends(get_run_store),
-    audit: AuditLogger = Depends(get_audit_logger),
+    audit: AuditLogger = Depends(get_request_audit_logger),
     llm: LLMClient = Depends(get_llm_client),
     access: AccessContext = Depends(get_access_context),
     public_source: PublicSource = Depends(get_public_source),

@@ -170,3 +170,43 @@ def test_tenant_id_field_is_persisted(tmp_path: Path) -> None:
     )
     payload = json.loads(path.read_text())
     assert payload["tenant_id"] == "acme-corp"
+
+
+def test_schema_version_is_1_1() -> None:
+    """D-106 bumped the schema to 1.1 for the added `client` field."""
+    assert SCHEMA_VERSION == "1.1"
+
+
+def test_unbound_logger_records_null_client(tmp_path: Path) -> None:
+    """A logger built without a client stamps `client` as null — the field is
+    always present (1.1) even when the surface didn't declare itself."""
+    path = tmp_path / "audit.jsonl"
+    logger = AuditLogger(FileAuditSink(path))
+    logger.log(AuditRecord(run_id="r1", tenant_id="default", tool_name="x", input={}))
+    payload = json.loads(path.read_text())
+    assert "client" in payload
+    assert payload["client"] is None
+
+
+def test_for_client_stamps_client_on_every_record(tmp_path: Path) -> None:
+    """D-106: a client-bound logger attributes each record to its surface."""
+    path = tmp_path / "audit.jsonl"
+    logger = AuditLogger(FileAuditSink(path)).for_client("mcp")
+    logger.log(AuditRecord(run_id="r1", tenant_id="default", tool_name="x", input={}))
+    payload = json.loads(path.read_text())
+    assert payload["client"] == "mcp"
+
+
+def test_for_client_shares_the_sink(tmp_path: Path) -> None:
+    """The bound logger writes to the same sink — binding is per-request, the
+    destination is process-wide."""
+    path = tmp_path / "audit.jsonl"
+    base = AuditLogger(FileAuditSink(path))
+    base.for_client("web").log(
+        AuditRecord(run_id="r1", tenant_id="default", tool_name="x", input={})
+    )
+    base.for_client("cli").log(
+        AuditRecord(run_id="r2", tenant_id="default", tool_name="y", input={})
+    )
+    lines = path.read_text().splitlines()
+    assert [json.loads(line)["client"] for line in lines] == ["web", "cli"]

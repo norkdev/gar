@@ -22,9 +22,9 @@ from gar_backend.agent.llm import LLMClient
 from gar_backend.agent.loop import run_until_gate
 from gar_backend.api.deps import (
     get_access_context,
-    get_audit_logger,
     get_llm_client,
     get_public_source,
+    get_request_audit_logger,
     get_run_store,
 )
 from gar_backend.api.runs import (
@@ -84,7 +84,7 @@ async def approve_concept_endpoint(
     run_id: str,
     req: ApproveConceptRequest,
     store: RunStore = Depends(get_run_store),
-    audit: AuditLogger = Depends(get_audit_logger),
+    audit: AuditLogger = Depends(get_request_audit_logger),
     llm: LLMClient = Depends(get_llm_client),
     access: AccessContext = Depends(get_access_context),
     public_source: PublicSource = Depends(get_public_source),
@@ -112,7 +112,7 @@ async def select_sources_endpoint(
     run_id: str,
     req: SelectSourcesRequest,
     store: RunStore = Depends(get_run_store),
-    audit: AuditLogger = Depends(get_audit_logger),
+    audit: AuditLogger = Depends(get_request_audit_logger),
     llm: LLMClient = Depends(get_llm_client),
     access: AccessContext = Depends(get_access_context),
     public_source: PublicSource = Depends(get_public_source),
