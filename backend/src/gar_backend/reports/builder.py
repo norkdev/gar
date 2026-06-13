@@ -6,6 +6,8 @@ Markdown text directly per the structure mandated in ``COMPOSE_REPORT_SYSTEM``
 and records it in ``.ignore`` so the walker excludes it on the next run.
 """
 
+from __future__ import annotations
+
 from datetime import date
 from pathlib import Path
 

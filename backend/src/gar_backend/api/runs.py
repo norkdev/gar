@@ -5,6 +5,8 @@ GET  /runs       — list runs for the current tenant
 GET  /runs/{id}  — fetch one run's state
 """
 
+from __future__ import annotations
+
 import uuid
 from pathlib import Path
 from typing import Any

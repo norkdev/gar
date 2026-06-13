@@ -11,6 +11,8 @@ PDF and image support is Future Work and will extend the file-type filter
 and the reader together.
 """
 
+from __future__ import annotations
+
 from collections.abc import Iterator
 from pathlib import Path
 

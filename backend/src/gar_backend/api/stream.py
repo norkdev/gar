@@ -19,6 +19,8 @@ frontend enough material to show meaningful progress without instrumenting
 the agent loop with a separate event sink.
 """
 
+from __future__ import annotations
+
 import asyncio
 import json
 from collections.abc import AsyncIterator

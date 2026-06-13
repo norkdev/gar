@@ -17,6 +17,8 @@ Every LLM call goes through :func:`_audited_complete` so the audit log
 inside :func:`gar_backend.agent.tools.dispatch`.
 """
 
+from __future__ import annotations
+
 import asyncio
 import json
 import time

@@ -17,6 +17,8 @@ call in the audit log (governance pillar #3) with input, output summary,
 duration, and status — including errors.
 """
 
+from __future__ import annotations
+
 import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass

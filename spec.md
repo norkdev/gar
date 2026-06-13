@@ -151,7 +151,7 @@
 - **フロントエンド**：Vite + React + TypeScript
   - 状態管理：TanStack Query（サーバ状態のみ、クライアント状態はほぼ要らない）
   - UI：Tailwind + shadcn/ui 程度の軽量構成
-- **バックエンド**：FastAPI（Python 3.14）
+- **バックエンド**：FastAPI（Python 3.13 — Lambda マネージドランタイムに合わせて固定）
   - agent loop / tools / governance / 監査ログ / Anthropic SDK 呼出はすべてここ
 - **通信**：HTTP（REST） + **SSE**（agent の進行ストリーム）
 - **デプロイ（v1）**：

@@ -2,3 +2,5 @@
 
 v1 skeleton — implementation pending.
 """
+
+from __future__ import annotations

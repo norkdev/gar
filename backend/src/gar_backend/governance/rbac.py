@@ -9,6 +9,8 @@ v1: single tenant (`default`), single role (`owner`). The structure supports
 future multi-tenant / multi-role expansion without changes to callers.
 """
 
+from __future__ import annotations
+
 from dataclasses import dataclass
 from typing import Protocol
 

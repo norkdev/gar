@@ -3,3 +3,5 @@
 v1 skeleton — implementation pending. Will use pydantic-settings once
 configuration fields accumulate.
 """
+
+from __future__ import annotations

@@ -18,6 +18,8 @@ source-agnostic; a new ``PublicSource`` requires no changes here as long
 as it emits a URL on its ``SearchResult``.
 """
 
+from __future__ import annotations
+
 import re
 from typing import Any
 

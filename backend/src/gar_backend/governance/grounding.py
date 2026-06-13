@@ -22,6 +22,8 @@ no spaces. Sources whose display name has a space (e.g. "web search") use
 an underscored identifier (e.g. "web_search") in the code and in citations.
 """
 
+from __future__ import annotations
+
 import re
 from dataclasses import dataclass
 

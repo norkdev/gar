@@ -6,6 +6,8 @@ constructors (which may need ANTHROPIC_API_KEY etc.) are never invoked
 under test.
 """
 
+from __future__ import annotations
+
 from pathlib import Path
 
 from gar_backend.agent.llm import AnthropicLLM, LLMClient

@@ -23,6 +23,8 @@ Read timeout is 60 s per attempt — slightly above arXiv's typical worst
 case so we don't pre-empt a slow-but-successful response.
 """
 
+from __future__ import annotations
+
 import asyncio
 import xml.etree.ElementTree as ET
 from datetime import datetime

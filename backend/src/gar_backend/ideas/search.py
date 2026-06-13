@@ -18,6 +18,8 @@ behind the same shape, alongside richer snippets (line ranges, heading
 offsets) and front-matter-aware title extraction.
 """
 
+from __future__ import annotations
+
 from pathlib import Path
 
 from gar_backend.ideas.reader import IdeaDocument, UnsupportedFileType, read

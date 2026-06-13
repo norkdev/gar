@@ -8,6 +8,8 @@ v1 does not stream. SSE wiring (agent step events → frontend) will be added
 when the agent loop is implemented.
 """
 
+from __future__ import annotations
+
 from dataclasses import dataclass
 from typing import Any, Protocol
 
@@ -130,7 +132,7 @@ def _parse_retry_after(exc: anthropic.RateLimitError) -> float | None:
         return None
     try:
         return float(value)
-    except TypeError, ValueError:
+    except (TypeError, ValueError):
         return None
 
 

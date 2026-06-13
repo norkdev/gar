@@ -38,7 +38,7 @@ When a design choice is ambiguous, defer to the spec's intent over convenience. 
 
 ## Environment & commands
 
-Python **3.14** is pinned via `.python-version`; the venv at `.venv/` is **uv-managed** (uv 0.9.17). The repo is a uv workspace — `backend/` and `infra/` are members.
+Python **3.13** is pinned via `.python-version` (chosen to match the AWS Lambda managed `python3.13` runtime — see deployment notes); the venv at `.venv/` is **uv-managed** (uv 0.9.17). The repo is a uv workspace — `backend/` and `infra/` are members.
 
 ### Setup
 

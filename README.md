@@ -314,7 +314,7 @@ volume; together they keep the door open.
 
 ## Running locally
 
-Python 3.14 is pinned. The repo is a uv workspace (`backend/` and
+Python 3.13 is pinned. The repo is a uv workspace (`backend/` and
 `infra/` are members); the frontend is a separate npm project.
 
 ```bash

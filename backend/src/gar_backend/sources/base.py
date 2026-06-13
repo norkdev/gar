@@ -8,6 +8,8 @@ A source declares its agent-facing tool identity via the ``tool_name`` and
 ``PublicSource`` implementation without source-specific glue code.
 """
 
+from __future__ import annotations
+
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Protocol

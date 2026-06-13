@@ -15,6 +15,8 @@ HTTP POSTs. The vault-write seam in ``api/gates.approve_report`` is the
 same one this CLI uses directly.
 """
 
+from __future__ import annotations
+
 import argparse
 import asyncio
 import os

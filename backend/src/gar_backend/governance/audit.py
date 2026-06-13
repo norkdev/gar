@@ -9,6 +9,8 @@ handlers without blocking the event loop meaningfully. The Protocol stays
 sync-shaped so swapping in async sinks later is an explicit decision.
 """
 
+from __future__ import annotations
+
 import json
 import threading
 from dataclasses import dataclass, field

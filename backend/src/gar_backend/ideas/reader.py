@@ -8,6 +8,8 @@ PDF support is Future Work; it will extend the suffix dispatch here together
 with `ideas/walker.py`'s file-type filter.
 """
 
+from __future__ import annotations
+
 from dataclasses import dataclass
 from pathlib import Path
 

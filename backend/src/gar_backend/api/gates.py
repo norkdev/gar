@@ -10,6 +10,8 @@ terminal state. Errors:
 - 409 if the run is not in the expected status for the gate
 """
 
+from __future__ import annotations
+
 from pathlib import Path
 from typing import Any
 

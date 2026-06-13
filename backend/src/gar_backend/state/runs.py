@@ -7,6 +7,8 @@ touching call sites (spec §10 seam #3). Every record carries `tenant_id`
 is exercised but always against a single tenant.
 """
 
+from __future__ import annotations
+
 from typing import Protocol
 
 from gar_backend.governance.hitl import RunState

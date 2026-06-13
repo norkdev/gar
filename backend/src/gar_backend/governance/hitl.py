@@ -10,6 +10,8 @@ Storage (DynamoDB in production, in-memory in v1 tests) lives in
 `state/runs.py` / `state/checkpoints.py`.
 """
 
+from __future__ import annotations
+
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from enum import StrEnum

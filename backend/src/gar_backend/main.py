@@ -7,6 +7,8 @@ is added; for v1 we run via uvicorn locally.
 configuration env vars) is available before dependency providers run.
 """
 
+from __future__ import annotations
+
 from dotenv import load_dotenv
 from fastapi import FastAPI
 
