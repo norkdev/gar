@@ -357,6 +357,7 @@ async def phase_compose_report(state: RunState, ctx: AgentContext) -> RunState:
     ]
 
     report = ""
+    final_validation: GroundingReport | None = None
     for attempt in range(MAX_COMPOSE_ATTEMPTS):
         response = await _audited_complete(
             ctx,
@@ -384,6 +385,7 @@ async def phase_compose_report(state: RunState, ctx: AgentContext) -> RunState:
             break
 
         validation = _validate_report(report, adopted_evidence_dicts)
+        final_validation = validation
         ctx.audit.log(
             AuditRecord(
                 run_id=state.run_id,
@@ -441,7 +443,28 @@ async def phase_compose_report(state: RunState, ctx: AgentContext) -> RunState:
     # No-op when there's no evidence to attach URLs to.
     if adopted_evidence_dicts:
         report = linkify_report(report, adopted_evidence_dicts)
-    return request_report_approval(state, report=report)
+    return request_report_approval(
+        state, report=report, validation=_summarize_validation(final_validation)
+    )
+
+
+def _summarize_validation(
+    validation: GroundingReport | None,
+) -> dict[str, Any] | None:
+    """Serialize a grounding result for the report gate's payload.
+
+    Returned to clients (web UI, MCP get_report) so they can show whether the
+    report's citations check out. ``None`` when there was no adopted evidence
+    to validate against — the report carries no citation guarantees then.
+    """
+    if validation is None:
+        return None
+    return {
+        "is_valid": validation.is_valid,
+        "has_citations": validation.has_citations,
+        "unknown_citations": [c.raw for c in validation.unknown_citations],
+        "unused_evidence": list(validation.unused_evidence),
+    }
 
 
 def _validate_report(

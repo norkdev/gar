@@ -1,0 +1,140 @@
+"""Thin async HTTP client over the GAR backend REST API (plan D-102).
+
+The MCP server is a *client* of the same API the web UI and CLI drive — it
+does not import gar_backend's internals. This keeps scale seam #2 (UI never
+calls AWS directly; the data plane is one hop from the backend) true for the
+MCP surface too: after the AWS migration only the base URL and auth header
+change, so the same MCP server runs unmodified against a remote backend.
+
+Every request carries ``X-GAR-Client: mcp`` so the audit log attributes the
+run to this surface (D-106).
+"""
+
+from __future__ import annotations
+
+import os
+from typing import Any
+
+import httpx
+
+DEFAULT_API_URL = "http://localhost:8000"
+CONNECT_TIMEOUT_SEC = 10.0
+# Agent phases run synchronously inside the POSTs in v1.1 (D-104), so a gate
+# call can take as long as the LLM + retrieval round-trips. Generous ceiling.
+REQUEST_TIMEOUT_SEC = 180.0
+
+
+class GarApiError(Exception):
+    """Backend unreachable or returned an error status.
+
+    The message is written for the MCP client's LLM to read and decide a next
+    step (retry, fix arguments, tell the human), not just for a log.
+    """
+
+
+class GarApiClient:
+    """Async wrapper over the GAR REST API.
+
+    Config resolves from explicit args first, then the environment:
+    ``GAR_API_URL`` (default ``http://localhost:8000``) and ``GAR_API_KEY``
+    (optional; sent as a bearer token). ``transport`` is injectable so tests
+    drive it with ``httpx.MockTransport`` — no live backend required.
+    """
+
+    def __init__(
+        self,
+        *,
+        base_url: str | None = None,
+        api_key: str | None = None,
+        transport: httpx.AsyncBaseTransport | None = None,
+    ) -> None:
+        resolved = base_url or os.environ.get("GAR_API_URL") or DEFAULT_API_URL
+        self._base_url = resolved.rstrip("/")
+        key = api_key if api_key is not None else os.environ.get("GAR_API_KEY")
+        self._headers = {"X-GAR-Client": "mcp"}
+        if key:
+            self._headers["Authorization"] = f"Bearer {key}"
+        self._client = httpx.AsyncClient(
+            base_url=self._base_url,
+            transport=transport,
+            timeout=httpx.Timeout(REQUEST_TIMEOUT_SEC, connect=CONNECT_TIMEOUT_SEC),
+        )
+
+    async def aclose(self) -> None:
+        await self._client.aclose()
+
+    async def _request(
+        self,
+        method: str,
+        path: str,
+        *,
+        json: Any | None = None,
+        params: dict[str, Any] | None = None,
+    ) -> Any:
+        try:
+            resp = await self._client.request(
+                method, path, json=json, params=params, headers=self._headers
+            )
+        except httpx.ConnectError as exc:
+            raise GarApiError(
+                f"Cannot reach the GAR backend at {self._base_url}. Is it running? "
+                f"Set GAR_API_URL if it lives elsewhere. ({exc})"
+            ) from exc
+        except httpx.HTTPError as exc:
+            raise GarApiError(
+                f"Request to the GAR backend at {self._base_url} failed: {exc}"
+            ) from exc
+        if resp.status_code >= 400:
+            raise GarApiError(_format_http_error(method, path, resp))
+        return resp.json()
+
+    async def create_run(self, notes: list[dict[str, str]]) -> dict[str, Any]:
+        return await self._request("POST", "/runs", json={"notes_content": notes})
+
+    async def list_runs(self) -> list[dict[str, Any]]:
+        return await self._request("GET", "/runs")
+
+    async def get_run(self, run_id: str) -> dict[str, Any]:
+        return await self._request("GET", f"/runs/{run_id}")
+
+    async def gate_concept(
+        self, run_id: str, *, edited_concept: str | None
+    ) -> dict[str, Any]:
+        return await self._request(
+            "POST",
+            f"/runs/{run_id}/gates/concept",
+            json={"edited_concept": edited_concept},
+        )
+
+    async def gate_sources(
+        self, run_id: str, *, adopted_source_ids: list[str]
+    ) -> dict[str, Any]:
+        return await self._request(
+            "POST",
+            f"/runs/{run_id}/gates/sources",
+            json={"adopted_source_ids": adopted_source_ids},
+        )
+
+    async def gate_report(self, run_id: str) -> dict[str, Any]:
+        return await self._request("POST", f"/runs/{run_id}/gates/report")
+
+
+def _format_http_error(method: str, path: str, resp: httpx.Response) -> str:
+    detail: str | None
+    try:
+        body = resp.json()
+        detail = body.get("detail") if isinstance(body, dict) else None
+    except ValueError:
+        detail = resp.text[:200] or None
+
+    base = f"GAR backend returned HTTP {resp.status_code} for {method} {path}"
+    if resp.status_code == 404:
+        return f"{base}: run not found. {detail or ''}".strip()
+    if resp.status_code == 409:
+        return (
+            f"{base}: the run is not in the right state for this action — the gate "
+            f"was already passed or called out of order. {detail or ''}"
+        ).strip()
+    if resp.status_code == 422:
+        return f"{base}: the request arguments were rejected. {detail or ''}".strip()
+    return f"{base}. {detail or ''}".strip()

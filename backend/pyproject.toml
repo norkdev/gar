@@ -10,10 +10,12 @@ dependencies = [
     "pathspec",
     "anthropic",
     "python-dotenv",
+    "mcp>=1.27.2",
 ]
 
 [project.scripts]
 gar = "gar_backend.cli:main"
+gar-mcp = "gar_backend.mcp_server.server:main"
 
 [dependency-groups]
 dev = [
