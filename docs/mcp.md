@@ -53,6 +53,19 @@ Notes:
   the backend ran while composing. `citations_valid` is `null` when the
   run adopted no sources (nothing to validate against).
 
+## Quick start (scripts)
+
+Two helper scripts live in `scripts/`:
+
+```bash
+./scripts/run-backend.sh    # start the backend (foreground; the prerequisite)
+./scripts/gar-mcp.sh        # launch the MCP server (stdio; usually via the client)
+```
+
+`gar-mcp.sh` runs from the repo root, applies the env defaults below, warns on
+stderr if the backend is unreachable, and keeps stdout clean for the stdio
+transport. Point your MCP client at it so the config stays in one place.
+
 ## Configuration
 
 All by environment variable:
@@ -69,14 +82,13 @@ running** (locally or, after the AWS migration, remotely). Only
 
 ## Claude Code
 
-Create a `.mcp.json` at the repository root:
+Create a `.mcp.json` at the repository root, pointing at the launch script:
 
 ```json
 {
   "mcpServers": {
     "gar": {
-      "command": "uv",
-      "args": ["run", "--package", "gar-backend", "gar-mcp"],
+      "command": "./scripts/gar-mcp.sh",
       "env": {
         "GAR_API_URL": "http://localhost:8000",
         "GAR_MCP_ROLE": "public"
@@ -86,9 +98,10 @@ Create a `.mcp.json` at the repository root:
 }
 ```
 
-Start the backend first (`uv run --package gar-backend uvicorn
-gar_backend.main:app --port 8000`), then Claude Code will launch `gar-mcp`
-on demand and the `gar` tools become available.
+(Or skip the script and use `"command": "uv", "args": ["run", "--package",
+"gar-backend", "gar-mcp"]` directly.) Start the backend first
+(`./scripts/run-backend.sh`), then Claude Code launches `gar-mcp` on demand
+and the `gar` tools become available.
 
 ## Claude Desktop
 
@@ -101,13 +114,7 @@ outside your shell:
 {
   "mcpServers": {
     "gar": {
-      "command": "uv",
-      "args": [
-        "run",
-        "--directory", "/absolute/path/to/gar",
-        "--package", "gar-backend",
-        "gar-mcp"
-      ],
+      "command": "/absolute/path/to/gar/scripts/gar-mcp.sh",
       "env": {
         "GAR_API_URL": "http://localhost:8000"
       }
@@ -116,8 +123,9 @@ outside your shell:
 }
 ```
 
-Restart Claude Desktop after editing. The backend must already be
-running.
+(Without the script: `"command": "uv", "args": ["run", "--directory",
+"/absolute/path/to/gar", "--package", "gar-backend", "gar-mcp"]`.) Restart
+Claude Desktop after editing. The backend must already be running.
 
 ## A run, end to end
 
