@@ -3,6 +3,10 @@
 [![CI](https://github.com/norkdev/gar/actions/workflows/ci.yml/badge.svg)](https://github.com/norkdev/gar/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
+<p align="center">
+  <img src="gar.png" alt="GAR mascot — a gar fish" width="240">
+</p>
+
 Surveys arXiv against your private Markdown idea notes. Every step is
 audited; humans gate access, source selection, and the final report.
 
