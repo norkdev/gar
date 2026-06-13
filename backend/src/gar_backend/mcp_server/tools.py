@@ -17,12 +17,14 @@ place for when ideas search is added to the MCP surface for the ``owner`` role.
 
 from __future__ import annotations
 
+import os
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Any, Literal
 
 from gar_backend.mcp_server.client import GarApiClient, GarApiError
 from gar_backend.mcp_server.models import (
+    Candidate,
     GateResult,
     NoteInput,
     ReportResult,
@@ -32,6 +34,25 @@ from gar_backend.mcp_server.models import (
 )
 
 ROLE_RANK: dict[str, int] = {"public": 0, "owner": 1}
+
+# Default cap on candidates returned by get_run_status. The sources gate is the
+# key human decision, so the default is generous — the client LLM can organize a
+# long list. Overridable per call (max_candidates arg) and per deployment
+# (GAR_MCP_MAX_CANDIDATES). Abstracts are included by default; a token-conscious
+# caller opts out with include_abstracts=False.
+DEFAULT_MAX_CANDIDATES = 100
+
+
+def _env_max_candidates() -> int:
+    raw = os.environ.get("GAR_MCP_MAX_CANDIDATES")
+    if raw is None:
+        return DEFAULT_MAX_CANDIDATES
+    try:
+        value = int(raw)
+    except ValueError:
+        return DEFAULT_MAX_CANDIDATES
+    return value if value > 0 else DEFAULT_MAX_CANDIDATES
+
 
 # Appended to every gate tool's description. The last mile of governance lives
 # in the MCP client's behavior, so the description is where we carry the rule.
@@ -68,7 +89,19 @@ def tools_for_role(tools: list[McpTool], role: str) -> list[McpTool]:
     ]
 
 
-def _summarize_activity(data: dict[str, Any]) -> str:
+def _to_candidate(c: dict[str, Any], *, include_abstracts: bool) -> Candidate:
+    """Map a stored candidate dict (serialized SearchResult) to a Candidate."""
+    return Candidate(
+        id=f"{c.get('source_name', '')}:{c.get('external_id', '')}",
+        title=c.get("title", ""),
+        abstract=(c.get("snippet") or None) if include_abstracts else None,
+        authors=list(c.get("authors") or []),
+        published=c.get("published"),
+        url=c.get("url") or None,
+    )
+
+
+def _summarize_activity(data: dict[str, Any], *, total: int, shown: int) -> str:
     status = data.get("status", "")
     payload = data.get("pending_payload", {})
     if status == "awaiting_concept_approval":
@@ -78,18 +111,11 @@ def _summarize_activity(data: dict[str, Any]) -> str:
             f"Derived concept: {concept}"
         )
     if status == "awaiting_source_selection":
-        candidates = payload.get("candidates", [])
-        shown = candidates[:20]
-        listing = "; ".join(
-            f"{c.get('source_name', '')}:{c.get('external_id', '')} — "
-            f"{c.get('title', '')}"
-            for c in shown
-        )
-        more = "" if len(candidates) <= 20 else f" (+{len(candidates) - 20} more)"
+        trunc = "" if shown >= total else f"; showing {shown} (raise max_candidates)"
         return (
-            f"Search complete; {len(candidates)} candidate(s) found. Awaiting human "
-            f"selection at the sources gate. Adopt by id (source_name:external_id) "
-            f"via select_sources{more}. Candidates: {listing}"
+            f"Search complete; {total} candidate(s) found{trunc}. Awaiting human "
+            "selection at the sources gate. The candidates are in the `candidates` "
+            "field; adopt by id via select_sources."
         )
     if status == "awaiting_report_approval":
         return (
@@ -125,18 +151,40 @@ def make_tools(client: GarApiClient) -> list[McpTool]:
             for r in rows
         ]
 
-    async def get_run_status(run_id: str) -> RunStatusResult:
+    env_max = _env_max_candidates()
+
+    async def get_run_status(
+        run_id: str,
+        max_candidates: int = env_max,
+        include_abstracts: bool = True,
+    ) -> RunStatusResult:
         """Check a run's status and what the human needs to decide next.
-        current_gate names the open gate (concept | sources | report);
-        activity_summary describes it (and lists candidates at the sources
-        gate)."""
+        current_gate names the open gate (concept | sources | report). At the
+        sources gate the `candidates` field holds the candidate sources (with
+        abstracts by default) for you to organize and present; candidate_count
+        is the total found. Lower max_candidates or set include_abstracts=False
+        to reduce tokens."""
         data = await client.get_run(run_id)
         status = data["status"]
+        raw = (
+            data.get("pending_payload", {}).get("candidates", [])
+            if status == "awaiting_source_selection"
+            else []
+        )
+        limit = max_candidates if max_candidates > 0 else env_max
+        shown = raw[:limit]
+        candidates = [
+            _to_candidate(c, include_abstracts=include_abstracts) for c in shown
+        ]
         return RunStatusResult(
             run_id=run_id,
             status=status,
             current_gate=_GATE_FOR_STATUS.get(status),
-            activity_summary=_summarize_activity(data),
+            activity_summary=_summarize_activity(
+                data, total=len(raw), shown=len(shown)
+            ),
+            candidates=candidates,
+            candidate_count=len(raw),
         )
 
     async def review_concept(

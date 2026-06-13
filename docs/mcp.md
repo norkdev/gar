@@ -20,7 +20,7 @@ governance layer still owns *how* each step runs.
 |---|---|---|---|
 | `start_survey` | `notes: [{path, content}]` | `run_id, status` | `POST /runs` |
 | `list_runs` | — | `[{run_id, status, updated_at}]` | `GET /runs` |
-| `get_run_status` | `run_id` | `status, current_gate?, activity_summary` | `GET /runs/{id}` |
+| `get_run_status` | `run_id, max_candidates=100, include_abstracts=true` | `status, current_gate?, activity_summary, candidates[], candidate_count` | `GET /runs/{id}` |
 | `review_concept` | `run_id, action: approve\|edit, edited_concept?` | `status` | gate 1 |
 | `select_sources` | `run_id, adopted_ids: [str]` | `status` | gate 2 |
 | `approve_report` | `run_id, action: approve\|reject, feedback?` | `status` | gate 3 |
@@ -32,6 +32,16 @@ Notes:
   the client's filesystem, so the same server works against a local or a
   remote backend. Reading your vault's files is the MCP client's job
   (Claude Code can read files); saving the returned report is too.
+- **Candidates at the sources gate.** `get_run_status` returns the
+  candidates as a structured `candidates` list (id, title, abstract,
+  authors, published, url), with `candidate_count` as the total found.
+  Abstracts are included by default — they are what makes relevance
+  judgeable, and they cost only tokens (the backend already fetched them).
+  A token-conscious caller sets `include_abstracts=false`; `max_candidates`
+  (default 100, or the `GAR_MCP_MAX_CANDIDATES` env default) caps the list.
+  Organizing and ranking the list is the client's job — the server returns
+  it raw. (Beyond the cap, results can still be missed; better ranking is
+  future work, not a bigger cap.)
 - **The gates need a human.** Each gate tool's description instructs the
   client to get an explicit human decision before calling it. That
   last mile lives in the client's behavior — present the material, then

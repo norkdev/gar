@@ -51,23 +51,98 @@ async def test_list_runs_maps_rows() -> None:
     await client.aclose()
 
 
-async def test_get_run_status_names_open_gate_and_summarizes_candidates() -> None:
-    data = {
+def _sources_data(n: int) -> dict:
+    return {
         "run_id": "r1",
         "status": "awaiting_source_selection",
         "pending_payload": {
             "candidates": [
-                {"source_name": "arxiv", "external_id": "1", "title": "Graph nets"},
-                {"source_name": "arxiv", "external_id": "2", "title": "Mesh nets"},
+                {
+                    "source_name": "arxiv",
+                    "external_id": str(i),
+                    "title": f"Paper {i}",
+                    "snippet": f"Abstract {i}",
+                    "authors": ["A. Author"],
+                    "published": "2024-01-01T00:00:00",
+                    "url": f"https://arxiv.org/abs/{i}",
+                }
+                for i in range(n)
             ]
         },
+    }
+
+
+async def test_get_run_status_returns_structured_candidates() -> None:
+    client = make_client(constant_handler(_sources_data(2)))
+    tools = tools_by_name(client)
+    out = await tools["get_run_status"].fn(run_id="r1")
+    assert out.current_gate == "sources"
+    assert out.candidate_count == 2
+    assert [c.id for c in out.candidates] == ["arxiv:0", "arxiv:1"]
+    assert out.candidates[0].title == "Paper 0"
+    assert out.candidates[0].url == "https://arxiv.org/abs/0"
+    assert out.candidates[0].authors == ["A. Author"]
+    await client.aclose()
+
+
+async def test_get_run_status_includes_abstracts_by_default() -> None:
+    client = make_client(constant_handler(_sources_data(1)))
+    tools = tools_by_name(client)
+    out = await tools["get_run_status"].fn(run_id="r1")
+    assert out.candidates[0].abstract == "Abstract 0"
+    await client.aclose()
+
+
+async def test_get_run_status_can_opt_out_of_abstracts() -> None:
+    client = make_client(constant_handler(_sources_data(1)))
+    tools = tools_by_name(client)
+    out = await tools["get_run_status"].fn(run_id="r1", include_abstracts=False)
+    assert out.candidates[0].abstract is None
+    await client.aclose()
+
+
+async def test_get_run_status_caps_candidates_and_keeps_total() -> None:
+    client = make_client(constant_handler(_sources_data(150)))
+    tools = tools_by_name(client)
+    out = await tools["get_run_status"].fn(run_id="r1", max_candidates=10)
+    assert out.candidate_count == 150  # total preserved
+    assert len(out.candidates) == 10  # but truncated
+    assert "showing 10" in out.activity_summary
+    await client.aclose()
+
+
+async def test_get_run_status_default_cap_is_100() -> None:
+    client = make_client(constant_handler(_sources_data(150)))
+    tools = tools_by_name(client)
+    out = await tools["get_run_status"].fn(run_id="r1")
+    assert len(out.candidates) == 100
+    await client.aclose()
+
+
+async def test_get_run_status_env_sets_default_cap(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """GAR_MCP_MAX_CANDIDATES sets the default when no max_candidates is passed."""
+    monkeypatch.setenv("GAR_MCP_MAX_CANDIDATES", "5")
+    client = make_client(constant_handler(_sources_data(150)))
+    tools = tools_by_name(client)  # default captured at make_tools time
+    out = await tools["get_run_status"].fn(run_id="r1")
+    assert len(out.candidates) == 5
+    await client.aclose()
+
+
+async def test_get_run_status_no_candidates_off_the_sources_gate() -> None:
+    data = {
+        "run_id": "r1",
+        "status": "awaiting_concept_approval",
+        "pending_payload": {"concept": "a concept"},
     }
     client = make_client(constant_handler(data))
     tools = tools_by_name(client)
     out = await tools["get_run_status"].fn(run_id="r1")
-    assert out.current_gate == "sources"
-    assert "2 candidate" in out.activity_summary
-    assert "arxiv:1" in out.activity_summary
+    assert out.candidates == []
+    assert out.candidate_count == 0
+    assert "concept" in out.activity_summary.lower()
     await client.aclose()
 
 

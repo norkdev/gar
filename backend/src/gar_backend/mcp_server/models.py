@@ -33,6 +33,25 @@ class RunSummary(BaseModel):
     updated_at: str
 
 
+class Candidate(BaseModel):
+    """One candidate source at the sources gate, for the client to organize and
+    present so the human can choose what to adopt."""
+
+    id: str = Field(
+        description="Adopt this source by passing this id to select_sources "
+        "(form: source_name:external_id)."
+    )
+    title: str
+    abstract: str | None = Field(
+        default=None,
+        description="The source's abstract. Present when include_abstracts is on; "
+        "the basis for judging relevance.",
+    )
+    authors: list[str] = Field(default_factory=list)
+    published: str | None = None
+    url: str | None = None
+
+
 class RunStatusResult(BaseModel):
     run_id: str
     status: str
@@ -44,6 +63,16 @@ class RunStatusResult(BaseModel):
     activity_summary: str = Field(
         description="Human-readable summary of where the run is and what the "
         "human needs to decide next."
+    )
+    candidates: list[Candidate] = Field(
+        default_factory=list,
+        description="Candidate sources to choose from at the sources gate (empty "
+        "otherwise). Organize and present these so the human picks what to adopt.",
+    )
+    candidate_count: int = Field(
+        default=0,
+        description="Total candidates found. If it exceeds len(candidates), the "
+        "list was truncated to max_candidates.",
     )
 
 
