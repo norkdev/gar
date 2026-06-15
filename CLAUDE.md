@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 **v1 backend complete + verified end-to-end against live arXiv + Anthropic APIs.** Monorepo as a uv workspace; three siblings:
 
-- `backend/` — FastAPI + agent loop + governance + sources/ideas/state/reports. 207 unit / integration tests passing. End-to-end smoke produced a complete, cited Markdown report; the grounding-retry path fired and recovered in production (LLM emitted 2 unknown citations on first compose; auto re-prompt produced a clean report on attempt 2).
+- `backend/` — FastAPI + agent loop + governance + sources/ideas/state/reports, plus an MCP server (`mcp_server/`, entry point `gar-mcp`) that exposes the governed gates over stdio as a third client (see `plan.md` / `docs/mcp.md`). 289 unit / integration tests passing. End-to-end smoke produced a complete, cited Markdown report; the grounding-retry path fired and recovered in production (LLM emitted 2 unknown citations on first compose; auto re-prompt produced a clean report on attempt 2).
 - `frontend/` — Vite + React + TypeScript. 5 views (Start / ConceptReview / SourceSelection / FinalReport / Completed) plus a live `Activity` SSE feed. Builds cleanly; browser smoke pending.
 - `infra/` — AWS CDK (Python) with five empty stacks (`Data` / `Workflow` / `Backend` / `Frontend` / `Auth`). Synthesizes successfully; no resources defined yet.
 

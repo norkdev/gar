@@ -18,7 +18,15 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Protocol
 
-SCHEMA_VERSION = "1.0"
+# schema_version 1.1 (was 1.0): adds the `client` field identifying which
+# surface drove the run (web / cli / mcp). Backward-compatible — a field
+# addition only; readers of 1.0 logs see `client` absent, readers of 1.1
+# logs see it null when the surface didn't declare one.
+SCHEMA_VERSION = "1.1"
+
+# The surfaces that may drive a run. Recorded on every audit record so the
+# log shows there is no shadow path — every run is attributable to a client.
+KNOWN_CLIENTS = frozenset({"web", "cli", "mcp"})
 
 
 @dataclass(frozen=True)
@@ -56,10 +64,23 @@ class FileAuditSink:
 
 
 class AuditLogger:
-    """Attaches schema_version + serializes records, then pushes to a sink."""
+    """Attaches schema_version + serializes records, then pushes to a sink.
 
-    def __init__(self, sink: AuditSink) -> None:
+    `client` is the surface that drove the run (web / cli / mcp). It is a
+    per-request attribute, not a property of any single tool call, so — like
+    schema_version — it is stamped here at serialization rather than carried
+    on every AuditRecord. Bind it per request with ``for_client``; the bound
+    logger shares this logger's sink.
+    """
+
+    def __init__(self, sink: AuditSink, *, client: str | None = None) -> None:
         self._sink = sink
+        self._client = client
+
+    def for_client(self, client: str | None) -> AuditLogger:
+        """Return a logger that stamps `client` on every record it writes,
+        sharing this logger's sink. ``None`` if the surface didn't declare one."""
+        return AuditLogger(self._sink, client=client)
 
     def log(self, record: AuditRecord) -> None:
         self._sink.write(
@@ -68,6 +89,7 @@ class AuditLogger:
                 "timestamp": record.timestamp.isoformat(),
                 "run_id": record.run_id,
                 "tenant_id": record.tenant_id,
+                "client": self._client,
                 "tool_name": record.tool_name,
                 "input": record.input,
                 "output": record.output,

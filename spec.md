@@ -242,3 +242,35 @@
   - 監査ログを構造化（JSONL）で書く
   - retrieve 手法を切替可能にしておく
   - HITL ゲートでのユーザー判断もログに残す
+
+---
+
+## 15. MCP サーバー（v1.1）
+
+v1.0 の二つのクライアント（CLI / Web UI）に、MCP クライアント（Claude Code /
+Claude Desktop）から GAR を操作できる三つ目のクライアント面を追加した。詳細な
+設計判断は `plan.md`（Phase 1）を正とし、ここでは spec として要点のみ確定する。
+
+- **公開面はゲート、内部ツールではない**：MCP が公開するのはラン管理と 3 つの
+  HITL ゲート（`start_survey` / `list_runs` / `get_run_status` /
+  `review_concept` / `select_sources` / `approve_report` / `get_report`）であり、
+  `search_arxiv` のような低レベル検索は公開しない。低レベルツールを公開すると
+  MCP クライアント側 LLM がエージェントループを代替でき、grounding・HITL・監査
+  をバイパスしたサーベイが成立する。ゲートを境界にすることで統治レイヤは
+  プロトコル境界を越えても不変（＝「統治付きサブエージェント」）。
+- **薄い REST クライアントとして実装**：MCP サーバーは `gar_backend` を import
+  せず、Web UI と同じ HTTP API を叩く（base URL = `GAR_API_URL`）。これにより
+  スケール seam #2（UI は AWS を直接呼ばない）が MCP にも及び、AWS 移行後も
+  base URL と認証ヘッダの差し替えだけで同じサーバーが動く。
+- **RBAC は構造的不在で再現**：起動ロール `GAR_MCP_ROLE`（既定 `public`）に応じ、
+  上位ロール専用ツールはスキーマに現れない（呼び出し時拒否ではない）。v1.1 は
+  公開ツールのみ。ideas（私案）検索を MCP に足すのは Future Work。
+- **MCP 操作も監査**：全リクエストに `X-GAR-Client: mcp` を付与し、監査レコードの
+  `client` フィールドに記録する（`schema_version` を 1.1 に）。
+- **ノート入力は content-upload パスのみ**：MCP は `vault_path` を公開せず、
+  ノート内容を引数で受ける。リモートバックエンドでも同一挙動になるため。
+  レポートの保存はクライアント側の責務。
+- **同期だが将来のポーリングを見越したスキーマ**：v1.1 は同期呼び出しだが、
+  `start_survey` は `run_id` を返し `get_run_status` でポーリングする形にして
+  あるので、Phase 2 で API が 202 + ポーリングに変わっても MCP ツールの形は
+  変わらない。

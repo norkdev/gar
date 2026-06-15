@@ -172,6 +172,21 @@ def test_request_report_approval_moves_to_awaiting_report() -> None:
     assert state.pending_payload == {"report": "# Report"}
 
 
+def test_request_report_approval_carries_validation_summary() -> None:
+    """A client retrieving the report (web UI / MCP get_report) can see
+    whether the citations check out."""
+    state = _drive_to(RunStatus.EVALUATING)
+    summary = {"is_valid": True, "unknown_citations": [], "unused_evidence": []}
+    state = request_report_approval(state, report="# Report", validation=summary)
+    assert state.pending_payload["report_validation"] == summary
+
+
+def test_request_report_approval_omits_validation_when_none() -> None:
+    state = _drive_to(RunStatus.EVALUATING)
+    state = request_report_approval(state, report="# Report", validation=None)
+    assert "report_validation" not in state.pending_payload
+
+
 def test_approve_report_completes_the_run() -> None:
     state = _drive_to(RunStatus.AWAITING_REPORT_APPROVAL)
     state = approve_report(state)

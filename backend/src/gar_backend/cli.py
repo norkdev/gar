@@ -160,7 +160,7 @@ async def run_cli(vault_path: Path) -> int:
     # public-source rate-limit clock, and the LLM client all share one
     # state. RunStore is fresh — CLI runs are isolated.
     store = InMemoryRunStore()
-    audit = get_audit_logger()
+    audit = get_audit_logger().for_client("cli")
     llm = get_llm_client()
     public_source = get_public_source()
     access = get_access_context()

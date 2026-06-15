@@ -142,13 +142,25 @@ def select_sources(state: RunState, *, adopted_source_ids: list[str]) -> RunStat
     )
 
 
-def request_report_approval(state: RunState, *, report: str) -> RunState:
-    """Agent finished evaluating; ask the user to approve / save the report."""
+def request_report_approval(
+    state: RunState, *, report: str, validation: dict[str, Any] | None = None
+) -> RunState:
+    """Agent finished evaluating; ask the user to approve / save the report.
+
+    ``validation`` is the grounding summary for this report (citation
+    validity, any unknown / unused citations). It is carried in the gate
+    payload so a client retrieving the report — the web UI or the MCP
+    ``get_report`` tool — can show whether the citations check out. Omitted
+    when there was no adopted evidence to validate against.
+    """
     _require(state, RunStatus.EVALUATING)
+    payload: dict[str, Any] = {"report": report}
+    if validation is not None:
+        payload["report_validation"] = validation
     return _advance(
         state,
         status=RunStatus.AWAITING_REPORT_APPROVAL,
-        pending_payload={"report": report},
+        pending_payload=payload,
     )
 
 

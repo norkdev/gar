@@ -28,11 +28,13 @@ mechanism on its own. "Guided" sits at the surface because the agent is
 not fully autonomous; "governance" describes how that guidance is enforced
 inside.
 
-> Status: v1 backend complete; 221 unit / integration tests passing;
+> Status: v1 backend complete; 289 unit / integration tests passing;
 > end-to-end smoke runs against the live arXiv API and the Anthropic
-> Claude API have produced complete, cited reports. Frontend is a minimal
-> React/TypeScript shell with a rendered Markdown preview. AWS infra
-> (CDK) synthesises but defines no resources yet.
+> Claude API have produced complete, cited reports. A third client — an
+> MCP server (`gar-mcp`) exposing the governed gates over stdio — ships
+> alongside the CLI and Web UI. Frontend is a minimal React/TypeScript
+> shell with a rendered Markdown preview. AWS infra (CDK) synthesises but
+> defines no resources yet.
 
 ---
 
@@ -224,28 +226,71 @@ direction the data already supports.
 
 ---
 
-## Two clients, two ideas-source implementations
+## Three clients, one governed loop
 
-The same agent loop is reachable two ways, and the *ideas* (private
-notes) source has two interchangeable implementations behind one shape:
+The same agent loop is reachable three ways. The *ideas* (private notes)
+source has two interchangeable implementations behind one shape; the
+client picks which by what it sends:
 
 | Client | Ideas source impl | What the backend sees | Where the report goes |
 |---|---|---|---|
 | **CLI** (`gar /path/to/vault`) | `IdeasSource` — walks the filesystem, honors `.gitignore` + `.ignore`, returns `file://` URLs | A vault path it can read | Saved to the vault folder; filename appended to `.ignore` |
 | **Web UI** (Vite + React picker) | `InMemoryIdeasSource` — operates on note contents POSTed from the browser | An array of `(path, content)` pairs | The user downloads / copies from the UI; no backend filesystem access |
+| **MCP server** (`gar-mcp`, stdio) | `InMemoryIdeasSource` — note contents passed by the MCP client | An array of `(path, content)` pairs | `get_report` returns the Markdown; the MCP client saves it |
 
-Both implementations satisfy the same duck-typed surface (`.name`,
-`.list_all()`, `.search()`). The agent loop, audit log, HITL gates,
-grounding validator, and RBAC layer don't know or care which one is
-mounted. The choice is made at the API boundary based on which field
+Both ideas-source implementations satisfy the same duck-typed surface
+(`.name`, `.list_all()`, `.search()`). The agent loop, audit log, HITL
+gates, grounding validator, and RBAC layer don't know or care which one
+is mounted. The choice is made at the API boundary based on which field
 the `POST /runs` request carries (`vault_path` vs `notes_content`).
 
-This is *why* two seem-similar code paths exist: the CLI gives a
+This is *why* these code paths exist side by side: the CLI gives a
 filesystem-rooted local workflow (with vault write-back and ignore
-accounting); the Web UI gives a backend-agnostic workflow that works
-identically against a future AWS-deployed backend or an Obsidian plugin
-talking to either. The shared agent loop and governance layer ensure
-the two surfaces stay behavior-equivalent without parallel maintenance.
+accounting); the Web UI and the MCP server give backend-agnostic
+workflows that work identically against a future AWS-deployed backend.
+The shared agent loop and governance layer keep the surfaces
+behavior-equivalent without parallel maintenance.
+
+### The MCP server exposes the gates, not the tools
+
+`gar-mcp` lets an MCP client (Claude Code, Claude Desktop) drive a survey.
+The deliberate design choice: it exposes **run management and the three
+HITL gates** — `start_survey`, `get_run_status`, `review_concept`,
+`select_sources`, `approve_report`, `get_report`, `list_runs` — and
+**not** GAR's low-level retrieval tools.
+
+That matters because the whole point of GAR is that every step is
+grounded, gated, and audited. If the MCP surface offered a raw
+`search_arxiv`, the *client's* LLM could run the retrieval-and-compose
+loop itself and hand back a "survey" that never passed grounding
+validation, never stopped at a human gate, and left no audit trail — the
+central claim would break exactly at the protocol boundary. Exposing the
+gates instead makes GAR a **governed sub-agent**: the MCP client gets to
+orchestrate *when* to advance, but the governance layer still owns *how*
+each step runs. The gate tools' descriptions carry the last-mile rule —
+get a human decision before calling them — because that mile lives in the
+client's behavior.
+
+Two design seams make this cheap and forward-compatible:
+
+- **Thin client over the REST API.** The server doesn't import the
+  backend; it calls the same HTTP API the Web UI uses (`GAR_API_URL`,
+  default `http://localhost:8000`). After the AWS migration only that URL
+  and an auth header change — the same `gar-mcp` runs against a remote
+  backend. This extends scale seam #2 (UI never calls AWS directly) to a
+  third surface.
+- **Role-gated tools.** A `GAR_MCP_ROLE` (`public` by default) selects
+  which tools appear. Tools above the role are *absent from the schema*,
+  not refused at call time — the same structural-absence principle as the
+  RBAC layer. v1.1 ships only public tools; the seam is ready for an
+  owner-only ideas search later.
+
+MCP-driven runs are audited like any other: every request carries
+`X-GAR-Client: mcp`, recorded on each audit record (`schema_version`
+1.1), so the log attributes every run to the surface that drove it.
+
+Configure it for Claude Code with a repo-root `.mcp.json`; see
+[`docs/mcp.md`](docs/mcp.md) for that and the Claude Desktop equivalent.
 
 ---
 
@@ -358,13 +403,33 @@ local-mode HTTP flow).
 The browser UI uses the *content-upload* path instead (no filesystem
 access on the backend side) and exists alongside the CLI; the agent
 loop and governance layer are shared. See
-[Two clients, two ideas-source implementations](#two-clients-two-ideas-source-implementations)
+[Three clients, one governed loop](#three-clients-one-governed-loop)
 below.
+
+### MCP server — drive GAR from an MCP client
+
+`gar-mcp` speaks the Model Context Protocol over stdio, so Claude Code or
+Claude Desktop can run a survey through the governed gates. It is a thin
+client of the backend's REST API, so the backend must be running:
+
+```bash
+# Terminal 1: the backend
+uv run --package gar-backend uvicorn gar_backend.main:app --port 8000
+
+# Terminal 2: the MCP server (usually launched by the MCP client, not by hand)
+GAR_API_URL=http://localhost:8000 uv run --package gar-backend gar-mcp
+```
+
+Configuration is by environment: `GAR_API_URL` (default
+`http://localhost:8000`), `GAR_API_KEY` (optional bearer token),
+`GAR_MCP_ROLE` (`public` by default). See [`docs/mcp.md`](docs/mcp.md)
+for the `.mcp.json` (Claude Code) and Claude Desktop config, the tool
+list, and why the surface is the gates rather than the raw tools.
 
 ### Tests
 
 ```bash
-uv run --package gar-backend pytest backend/tests/   # 246 tests
+uv run --package gar-backend pytest backend/tests/   # 289 tests
 (cd frontend && npm run build)                       # type-check + bundle
 ```
 
