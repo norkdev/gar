@@ -313,8 +313,21 @@ F1(等重み)は目的に合わないため使わない。
   (上限 8000 字)を注入し、要約で落ちた技術語句を literature クエリに使わせる
   (spec §5 の未実現を実装)。privacy:生の私案を web search に流さない指示は維持
   (arXiv 等の文献ソースには distill した技術語のみ)。
-- **D. rerank(未実装・次バッチ)**: マージ後候補をコンセプトとの関連度で並べ替え、
-  MCP の上限は rerank 後に切る。arXiv 返却が関連度順でない問題への本質的対処。
-  spec §5(retrieve 技法はツール)/§14(評価しやすい構造)に直結。
-- **計器(未実装・次バッチ)**: recall@K を測る最小評価ループ(既知の決定的先行研究を
-  仕込み、上位 K で拾えるか)。改善の効果を定量化する。
+- **D. rerank(実装済み, feature/recall)**: `retrieval/rerank.py` に `Reranker`
+  Protocol(spec §5 のスワップ点)+ 依存なしの `BM25Reranker`。`phase_search` で
+  dedup 後・ソースゲート前にコンセプトで並べ替え → MCP の上限は rerank 後に切れる
+  (低関連の裾だけ落ちる)。安定ソートで無シグナル時は no-op。embedding/LLM rerank は
+  同 Protocol で後から差し替え可能。
+- **計器(実装済み, feature/recall)**: `retrieval/recall.py` に `recall_at_k` /
+  `rank_of` / `known_item_recall`(純関数)。オフラインテストで「決定的先行研究を
+  プールの末尾に仕込み → rerank で上位 K に引き上がる(recall@5: 0.0→1.0)」を実証。
+  実 arXiv に対する live 評価ハーネス(seed 概念＋ハンドラベル)は今後の作業。
+
+### 実地検証(v1.1 スモーク, 2026-06-15)
+
+同一ノートで B+A 適用前後を比較:候補 **94→294**(3.1×)、arXiv 検索 **12→23**、
+原文注入で private_ideas 検索も発火。前回採用の核心6件中5件を再発見＋着想により近い
+新規文献(One Chatbot Per Person 等)が多数浮上。知見:(イ)breadth 化は厳密な上位
+集合ではない(クエリ語彙の変動で出入りあり)→ rerank + recall@K 計器で制御/計測する
+動機。(ロ)recall-max 検索は重く、同期 gate POST が接続タイムアウト → run は durable
+で完走しポーリング復帰(D-104 の実証、Phase 2 非同期化の動機)。

@@ -349,6 +349,45 @@ async def test_search_respects_max_iterations(tmp_path: Path) -> None:
     assert len(llm.calls) == 2  # capped at max_search_iterations
 
 
+async def test_search_reranks_candidates_by_concept_relevance(
+    tmp_path: Path,
+) -> None:
+    """phase_search orders the pool by concept-relevance before the gate, so the
+    most relevant work is first regardless of source return order (spec §5)."""
+    fake = _FakePublicSource(
+        results=[
+            SearchResult(
+                "test_source",
+                "off",
+                "Sourdough baking",
+                "bread recipes",
+                (),
+                None,
+                "http://x",
+            ),
+            SearchResult(
+                "test_source",
+                "on",
+                "Widget concept system",
+                "a widget concept mechanism",
+                (),
+                None,
+                "http://y",
+            ),
+        ]
+    )
+    registry = ToolRegistry()
+    register_default_tools(registry, public_source=fake)  # type: ignore[arg-type]
+    llm = StubLLM([_tool_use("tu1", fake.tool_name, {"query": "q"}), _text("done")])
+    ctx = _build_ctx(tmp_path, llm, registry=registry)
+
+    state = _state_at_searching(tmp_path)  # concept = "widget concept"
+    new = await phase_search(state, ctx)
+
+    ids = [c["external_id"] for c in new.pending_payload["candidates"]]
+    assert ids[0] == "on"  # the concept-matching paper is lifted to the top
+
+
 # ---------- phase_compose_report ----------
 
 

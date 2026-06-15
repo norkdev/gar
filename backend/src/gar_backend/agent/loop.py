@@ -22,7 +22,7 @@ from __future__ import annotations
 import asyncio
 import json
 import time
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, cast
 
@@ -58,6 +58,7 @@ from gar_backend.governance.rbac import AccessContext, ToolRegistry
 from gar_backend.ideas.reader import IdeaDocument, UnsupportedFileType, read
 from gar_backend.ideas.walker import walk
 from gar_backend.reports.linkify import linkify_report
+from gar_backend.retrieval.rerank import BM25Reranker, Reranker
 from gar_backend.sources.base import SearchResult
 from gar_backend.state.runs import RunStore
 
@@ -76,6 +77,9 @@ class AgentContext:
     # recall — more rounds let the agent cover more facets / query wordings
     # before stopping (spec §5; recall is the priority for novelty survey).
     max_search_iterations: int = 6
+    # Orders the candidate pool by concept-relevance before the sources gate
+    # (spec §5 swap point). Default lexical BM25; no external dependency.
+    reranker: Reranker = field(default_factory=BM25Reranker)
 
 
 # Retry configuration for transient rate-limit errors from the LLM client.
@@ -378,7 +382,12 @@ async def phase_search(state: RunState, ctx: AgentContext) -> RunState:
                 )
         messages.append(Message(role="user", content=tool_result_blocks))
 
-    return request_source_selection(state, candidates=_dedupe_candidates(candidates))
+    # Order the pool by concept-relevance so the sources gate (and any
+    # downstream cap) sees the most relevant work first — arXiv does not
+    # return results in relevance order (spec §5).
+    deduped = _dedupe_candidates(candidates)
+    ranked = ctx.reranker.rank(concept, deduped)
+    return request_source_selection(state, candidates=ranked)
 
 
 # ------------- phase: compose report -------------
