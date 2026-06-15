@@ -8,11 +8,15 @@
 
 ## 0. ゴールと優先順位
 
-1. **Phase 1(最優先): ローカル MCP サーバー** — Claude Code / Claude Desktop
-   から GAR を操作できるようにする。stdio トランスポート。`v1.1.0` タグ。
-2. **Phase 2: AWS 移行** — v1 に組み込み済みのスケールシームを実リソースに
-   差し替える。`v1.2.0` タグ。
-3. **Phase 3(スコープ外・記録のみ): リモート MCP** — AWS 上の
+1. **Phase 1(完了): ローカル MCP サーバー** — Claude Code / Claude Desktop
+   から GAR を操作できるようにする。stdio トランスポート。**`v1.1.0` 済み。**
+2. **検索 recall トラック(完了): `v1.2.0`** — breadth 検索 + 原文フレーズ注入
+   + BM25 rerank + recall@K 計器、および MCP ゲートの timeout ポーリング復帰
+   (§5 / PR #2,#3)。当初 v1.2.0 は AWS に割り当てていたが、AWS は v2.x に後ろ倒し、
+   この中間の機能追加を v1.2.0 とした。
+3. **Phase 2: AWS 移行** — v1 に組み込み済みのスケールシームを実リソースに
+   差し替える。**`v2.0.0`(v2.x)タグ。**
+4. **Phase 3(スコープ外・記録のみ): リモート MCP** — AWS 上の
    streamable HTTP MCP + OAuth。本計画では実装しない。
 
 Phase 1 と Phase 2 が直交するように設計する(後述の D-102)。
@@ -248,7 +252,7 @@ arXiv 取得時に既に SearchResult.snippet として state にあり、エー
    まず「受付 Lambda が非同期で自己 invoke」の最小構成とし、
    Step Functions wait-for-callback への発展は future work のまま据え置く。
    ※ MCP ツールの形は D-104 により不変。Web UI はポーリング対応の修正が必要
-   (SSE は v1.2 では CloudWatch ベースに置き換えず、ポーリングに簡素化して
+   (SSE は v2 では CloudWatch ベースに置き換えず、ポーリングに簡素化して
    よい — 判断は実装時に)。
 4. **監査ログ**: ラン単位で S3 オブジェクト(JSONL)に書く。ローカルは
    従来通りファイル。`AuditSink` 抽象を切って 2 実装。
@@ -256,7 +260,7 @@ arXiv 取得時に既に SearchResult.snippet として state にあり、エー
    env でプロバイダ選択。クロスリージョン推論プロファイルの利用は実装時に
    リージョン事情を確認して決める。
 6. **認証**: `api/auth.py` の pass-through を API キー検証(API Gateway の
-   API key または独自ヘッダ)に差し替え。**Cognito は v1.2 ではやらない**。
+   API key または独自ヘッダ)に差し替え。**Cognito は v2 ではやらない**。
 7. **CDK**: スカフォールド済みスタックに実リソース定義
    (DynamoDB / S3 / Lambda / API Gateway / IAM)。`cdk synth` が CI で
    通ることを維持。
@@ -265,7 +269,7 @@ arXiv 取得時に既に SearchResult.snippet として state にあり、エー
    (未公開ノートの所在はこのプロジェクトのプライバシー設計の核心なので、
    設計判断として 1 段落書く)。
 
-### 3.2 やらないこと(v1.2 スコープ外)
+### 3.2 やらないこと(v2 スコープ外)
 
 - Cognito / OAuth、マルチテナントの実体化(シームは維持)
 - リモート MCP(streamable HTTP)
@@ -274,9 +278,9 @@ arXiv 取得時に既に SearchResult.snippet として state にあり、エー
 
 ### 3.3 リリース
 
-- README: Architecture 図を v1.2 構成(local / AWS の 2 通り)に更新。
+- README: Architecture 図を v2 構成(local / AWS の 2 通り)に更新。
   「AWS infra: scaffolded」の記述を実態に合わせて更新。
-- `v1.2.0` タグ。
+- `v2.0.0` タグ。
 
 ---
 
