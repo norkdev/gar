@@ -207,6 +207,80 @@ async def test_search_finishes_when_llm_does_not_call_tools(
     assert len(llm.calls) == 1
 
 
+# ---------- recall: original-note injection + breadth (spec §5) ----------
+
+
+async def test_search_injects_original_notes_vault_mode(tmp_path: Path) -> None:
+    """The search phase mines distinctive phrases from the raw notes, not just
+    the summarized concept (spec §5)."""
+    (tmp_path / "idea.md").write_text("SUBPROFILE confidence threshold gossip")
+    llm = StubLLM([_text("Done.")])
+    ctx = _build_ctx(tmp_path, llm)
+
+    state = _state_at_searching(tmp_path)
+    await phase_search(state, ctx)
+
+    user_text = llm.calls[0]["messages"][0].content[0]["text"]
+    assert "ORIGINAL NOTES" in user_text
+    assert "SUBPROFILE confidence threshold gossip" in user_text
+
+
+async def test_search_injects_original_notes_content_mode(tmp_path: Path) -> None:
+    llm = StubLLM([_text("Done.")])
+    ctx = _build_ctx(tmp_path, llm)
+    state = create_run(
+        run_id="r1",
+        tenant_id="default",
+        notes_content=[{"path": "a.md", "content": "NEIGHBOR relevance scoring"}],
+    )
+    state = request_concept_approval(state, concept="c")
+    state = approve_concept(state)
+
+    await phase_search(state, ctx)
+
+    user_text = llm.calls[0]["messages"][0].content[0]["text"]
+    assert "NEIGHBOR relevance scoring" in user_text
+
+
+def test_original_notes_text_caps_length() -> None:
+    big = "x" * 20000
+    state = create_run(
+        run_id="r1",
+        tenant_id="default",
+        notes_content=[{"path": "a.md", "content": big}],
+    )
+    assert len(loop._original_notes_text(state, cap=100)) == 100
+
+
+def test_original_notes_text_empty_without_notes(tmp_path: Path) -> None:
+    """Missing/unreadable notes degrade to empty so search still runs."""
+    state = create_run(
+        run_id="r1", tenant_id="default", vault_path=tmp_path / "nonexistent"
+    )
+    assert loop._original_notes_text(state) == ""
+
+
+def test_max_search_iterations_default_is_6() -> None:
+    """Raised from 4 to favor recall."""
+    field = AgentContext.__dataclass_fields__["max_search_iterations"]
+    assert field.default == 6
+
+
+def test_search_prompt_prioritizes_recall() -> None:
+    from gar_backend.agent.prompts import SEARCH_SYSTEM
+
+    assert "RECALL" in SEARCH_SYSTEM
+    assert "facet" in SEARCH_SYSTEM.lower()
+    # the old precision-capping instruction is gone
+    assert "5-20 candidates" not in SEARCH_SYSTEM
+
+
+def test_public_search_default_max_results_raised() -> None:
+    from gar_backend.agent.tools import _PUBLIC_SEARCH_INPUT_SCHEMA
+
+    assert _PUBLIC_SEARCH_INPUT_SCHEMA["properties"]["max_results"]["default"] == 15
+
+
 async def test_search_collects_candidates_via_tool_dispatch(
     tmp_path: Path,
 ) -> None:
@@ -273,6 +347,45 @@ async def test_search_respects_max_iterations(tmp_path: Path) -> None:
 
     assert new.status is RunStatus.AWAITING_SOURCE_SELECTION
     assert len(llm.calls) == 2  # capped at max_search_iterations
+
+
+async def test_search_reranks_candidates_by_concept_relevance(
+    tmp_path: Path,
+) -> None:
+    """phase_search orders the pool by concept-relevance before the gate, so the
+    most relevant work is first regardless of source return order (spec §5)."""
+    fake = _FakePublicSource(
+        results=[
+            SearchResult(
+                "test_source",
+                "off",
+                "Sourdough baking",
+                "bread recipes",
+                (),
+                None,
+                "http://x",
+            ),
+            SearchResult(
+                "test_source",
+                "on",
+                "Widget concept system",
+                "a widget concept mechanism",
+                (),
+                None,
+                "http://y",
+            ),
+        ]
+    )
+    registry = ToolRegistry()
+    register_default_tools(registry, public_source=fake)  # type: ignore[arg-type]
+    llm = StubLLM([_tool_use("tu1", fake.tool_name, {"query": "q"}), _text("done")])
+    ctx = _build_ctx(tmp_path, llm, registry=registry)
+
+    state = _state_at_searching(tmp_path)  # concept = "widget concept"
+    new = await phase_search(state, ctx)
+
+    ids = [c["external_id"] for c in new.pending_payload["candidates"]]
+    assert ids[0] == "on"  # the concept-matching paper is lifted to the top
 
 
 # ---------- phase_compose_report ----------

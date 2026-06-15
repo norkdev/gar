@@ -291,3 +291,43 @@ arXiv 取得時に既に SearchResult.snippet として state にあり、エー
 - テストは `backend/tests/` のミラー構造に追加。全テストはオフラインを維持。
 - このファイルの Decisions に反する実装が必要になったら、先にこのファイルを
   更新し、理由を 1 段落書いてから実装する。
+
+---
+
+## 5. 検索 recall 改善トラック(Phase 2 とは独立)
+
+MCP スモークで判明:arXiv 検索の取りこぼし(関連の核心文献が候補順の後方に
+埋もれる/そもそも検索語に乗らない)が、GAR の本来目的(新規性・進歩性の予備
+調査)に直接効く。**目的に照らすと precision より recall が支配的**——先行研究
+の見逃し(FN)は「偽の新規」を生む致命的誤りで、余分な候補(FP)は人間/
+クライアントが弾けばよい(D-108 でアブスト提示済み)。指標は **recall@K**(人間
+が読む上位 K 件で決定的先行研究を拾えるか)+ **citation precision = 1.0**(grounding)。
+F1(等重み)は目的に合わないため使わない。
+
+レバー(影響大→小):
+
+- **B. breadth 検索(実装済み, feature/recall)**: `SEARCH_SYSTEM` を recall 優先に
+  書き換え(ファセット分解・同義語/別表記・並列クエリ・過剰 prune 禁止、「5-20件で
+  停止」を撤廃)。`max_search_iterations` 4→6、検索ツール `max_results` 既定 10→15。
+- **A. 原文フレーズ注入(実装済み, feature/recall)**: 検索フェーズに元ノート原文
+  (上限 8000 字)を注入し、要約で落ちた技術語句を literature クエリに使わせる
+  (spec §5 の未実現を実装)。privacy:生の私案を web search に流さない指示は維持
+  (arXiv 等の文献ソースには distill した技術語のみ)。
+- **D. rerank(実装済み, feature/recall)**: `retrieval/rerank.py` に `Reranker`
+  Protocol(spec §5 のスワップ点)+ 依存なしの `BM25Reranker`。`phase_search` で
+  dedup 後・ソースゲート前にコンセプトで並べ替え → MCP の上限は rerank 後に切れる
+  (低関連の裾だけ落ちる)。安定ソートで無シグナル時は no-op。embedding/LLM rerank は
+  同 Protocol で後から差し替え可能。
+- **計器(実装済み, feature/recall)**: `retrieval/recall.py` に `recall_at_k` /
+  `rank_of` / `known_item_recall`(純関数)。オフラインテストで「決定的先行研究を
+  プールの末尾に仕込み → rerank で上位 K に引き上がる(recall@5: 0.0→1.0)」を実証。
+  実 arXiv に対する live 評価ハーネス(seed 概念＋ハンドラベル)は今後の作業。
+
+### 実地検証(v1.1 スモーク, 2026-06-15)
+
+同一ノートで B+A 適用前後を比較:候補 **94→294**(3.1×)、arXiv 検索 **12→23**、
+原文注入で private_ideas 検索も発火。前回採用の核心6件中5件を再発見＋着想により近い
+新規文献(One Chatbot Per Person 等)が多数浮上。知見:(イ)breadth 化は厳密な上位
+集合ではない(クエリ語彙の変動で出入りあり)→ rerank + recall@K 計器で制御/計測する
+動機。(ロ)recall-max 検索は重く、同期 gate POST が接続タイムアウト → run は durable
+で完走しポーリング復帰(D-104 の実証、Phase 2 非同期化の動機)。

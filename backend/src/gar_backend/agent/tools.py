@@ -46,8 +46,9 @@ _PUBLIC_SEARCH_INPUT_SCHEMA: dict[str, Any] = {
         },
         "max_results": {
             "type": "integer",
-            "description": "Maximum results to return.",
-            "default": 10,
+            "description": "Maximum results to return. Prefer a generous value "
+            "(e.g. 15-25) so each query pulls a deep list for recall.",
+            "default": 15,
         },
     },
     "required": ["query"],
