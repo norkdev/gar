@@ -42,6 +42,14 @@ Notes:
   Organizing and ranking the list is the client's job — the server returns
   it raw. (Beyond the cap, results can still be missed; better ranking is
   future work, not a bigger cap.)
+- **Long phases return `processing`.** The search and compose phases run
+  synchronously inside `review_concept` / `select_sources` (v1.1, D-104). A
+  recall-broad search can outrun the request timeout — when it does, the
+  backend keeps working and the run advances (durable state), and the tool
+  returns `status: "processing"` instead of an error. Poll `get_run_status`
+  until `current_gate` opens, then continue. (`start_survey` has no run_id
+  to poll yet, so on timeout it points you at `list_runs`.) Phase 2's async
+  migration removes the timeout entirely; the tool shapes don't change.
 - **The gates need a human.** Each gate tool's description instructs the
   client to get an explicit human decision before calling it. That
   last mile lives in the client's behavior — present the material, then

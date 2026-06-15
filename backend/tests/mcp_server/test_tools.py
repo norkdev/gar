@@ -275,6 +275,40 @@ async def test_get_report_errors_when_no_report_yet() -> None:
     await client.aclose()
 
 
+def _timeout_handler(request: httpx.Request) -> httpx.Response:
+    raise httpx.ReadTimeout("timeout")
+
+
+async def test_review_concept_timeout_reports_processing() -> None:
+    """A long search times out the POST, but the run keeps going server-side —
+    the tool reports 'processing' so the client polls (D-104)."""
+    client = make_client(_timeout_handler)
+    tools = tools_by_name(client)
+    out = await tools["review_concept"].fn(run_id="r1", action="approve")
+    assert out.run_id == "r1"
+    assert out.status == "processing"
+    await client.aclose()
+
+
+async def test_select_sources_timeout_reports_processing() -> None:
+    client = make_client(_timeout_handler)
+    tools = tools_by_name(client)
+    out = await tools["select_sources"].fn(run_id="r1", adopted_ids=[])
+    assert out.status == "processing"
+    await client.aclose()
+
+
+async def test_start_survey_timeout_advises_list_runs() -> None:
+    """start_survey has no run_id to poll yet, so it points the client at
+    list_runs instead of a bare failure."""
+    client = make_client(_timeout_handler)
+    tools = tools_by_name(client)
+    with pytest.raises(GarApiError) as ei:
+        await tools["start_survey"].fn(notes=[NoteInput(path="a.md", content="x")])
+    assert "list_runs" in str(ei.value)
+    await client.aclose()
+
+
 async def test_backend_error_propagates_through_tool() -> None:
     """Gate state errors are the backend's responsibility; the MCP tool passes
     them through unchanged (plan §2.3)."""

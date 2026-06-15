@@ -20,8 +20,11 @@ import httpx
 DEFAULT_API_URL = "http://localhost:8000"
 CONNECT_TIMEOUT_SEC = 10.0
 # Agent phases run synchronously inside the POSTs in v1.1 (D-104), so a gate
-# call can take as long as the LLM + retrieval round-trips. Generous ceiling.
-REQUEST_TIMEOUT_SEC = 180.0
+# call can take as long as the LLM + retrieval round-trips. A recall-broad
+# search can exceed even this; when it does, the read times out but the backend
+# keeps working and the run advances (durable state) — the gate tools turn that
+# timeout into a "processing" result the client recovers by polling.
+REQUEST_TIMEOUT_SEC = 240.0
 
 
 class GarApiError(Exception):
@@ -30,6 +33,15 @@ class GarApiError(Exception):
     The message is written for the MCP client's LLM to read and decide a next
     step (retry, fix arguments, tell the human), not just for a log.
     """
+
+
+class GarApiTimeout(GarApiError):
+    """The backend did not respond within the read timeout.
+
+    Distinct from GarApiError because it is *recoverable*: the synchronous phase
+    is still running server-side and the run will advance (durable state). The
+    gate tools catch this and report the run as still processing so the client
+    polls get_run_status rather than treating it as a failure (D-104)."""
 
 
 class GarApiClient:
@@ -75,10 +87,17 @@ class GarApiClient:
             resp = await self._client.request(
                 method, path, json=json, params=params, headers=self._headers
             )
-        except httpx.ConnectError as exc:
+        except (httpx.ConnectError, httpx.ConnectTimeout) as exc:
             raise GarApiError(
                 f"Cannot reach the GAR backend at {self._base_url}. Is it running? "
                 f"Set GAR_API_URL if it lives elsewhere. ({exc})"
+            ) from exc
+        except httpx.ReadTimeout as exc:
+            # The backend is still processing — recoverable, not a failure.
+            raise GarApiTimeout(
+                f"The GAR backend did not respond within "
+                f"{REQUEST_TIMEOUT_SEC:.0f}s. The run is likely still running; "
+                "poll get_run_status."
             ) from exc
         except httpx.HTTPError as exc:
             raise GarApiError(
