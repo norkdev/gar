@@ -72,7 +72,10 @@ class AgentContext:
     store: RunStore
     access: AccessContext
     model: str = "claude-sonnet-4-6"
-    max_search_iterations: int = 4
+    # Number of search turns the agent gets. Raised from 4 to 6 to favor
+    # recall — more rounds let the agent cover more facets / query wordings
+    # before stopping (spec §5; recall is the priority for novelty survey).
+    max_search_iterations: int = 6
 
 
 # Retry configuration for transient rate-limit errors from the LLM client.
@@ -246,6 +249,41 @@ async def phase_derive_concept(
 
 # ------------- phase: search -------------
 
+# Cap on original-note text injected into the search context. Idea notes are
+# usually small; this bounds the rare large vault so notes don't dominate the
+# prompt or cost. Truncation only loses tail phrases, not whole facets.
+NOTES_INJECTION_CAP = 8000
+
+
+def _original_notes_text(state: RunState, *, cap: int = NOTES_INJECTION_CAP) -> str:
+    """Reconstruct the user's original notes for the search phase, both modes.
+
+    Content mode reads ``context['notes_content']``; vault mode re-walks the
+    vault. Best-effort: any failure returns an empty string so search still
+    runs on the concept alone.
+    """
+    try:
+        if "notes_content" in state.context:
+            parts = [
+                f"--- {item['path']} ---\n{item['content']}"
+                for item in state.context["notes_content"]
+            ]
+        elif "vault_path" in state.context:
+            vault_path = Path(state.context["vault_path"])
+            docs: list[str] = []
+            for path in walk(vault_path):
+                try:
+                    doc = read(path)
+                except UnsupportedFileType:
+                    continue
+                docs.append(f"--- {doc.path.as_posix()} ---\n{doc.content}")
+            parts = docs
+        else:
+            return ""
+    except Exception:
+        return ""
+    return "\n\n".join(parts)[:cap]
+
 
 async def phase_search(state: RunState, ctx: AgentContext) -> RunState:
     """Run the agentic search until the LLM stops requesting tools."""
@@ -255,6 +293,19 @@ async def phase_search(state: RunState, ctx: AgentContext) -> RunState:
     tool_definitions: list[ToolDefinition] = [t.definition for t in agent_tools]
     tool_by_name = {t.name: t for t in agent_tools}
 
+    # Inject the user's original notes so the agent can mine distinctive
+    # technical phrases for literature queries — features lost in the concept
+    # summary (spec §5, recall). Bounded so it doesn't dominate the context;
+    # the prompt forbids sending raw private notes to web search.
+    notes_block = ""
+    notes_text = _original_notes_text(state)
+    if notes_text:
+        notes_block = (
+            "\n\nThe user's ORIGINAL NOTES (mine distinctive technical phrases "
+            "from these for literature queries; do NOT send raw private content "
+            f"to web search):\n{notes_text}"
+        )
+
     messages: list[Message] = [
         Message(
             role="user",
@@ -262,9 +313,11 @@ async def phase_search(state: RunState, ctx: AgentContext) -> RunState:
                 {
                     "type": "text",
                     "text": (
-                        f"Concept to investigate:\n{concept}\n\n"
-                        "Search for related work using the available tools. When "
-                        "you have a reasonable shortlist, stop calling tools."
+                        f"Concept to investigate:\n{concept}{notes_block}\n\n"
+                        "Search broadly for related work using the available "
+                        "tools, prioritizing recall across the concept's facets. "
+                        "Stop only when the facets are covered and new queries "
+                        "stop surfacing relevant work."
                     ),
                 }
             ],
