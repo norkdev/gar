@@ -22,7 +22,7 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Any, Literal
 
-from gar_backend.mcp_server.client import GarApiClient, GarApiError
+from gar_backend.mcp_server.client import GarApiClient, GarApiError, GarApiTimeout
 from gar_backend.mcp_server.models import (
     Candidate,
     GateResult,
@@ -34,6 +34,12 @@ from gar_backend.mcp_server.models import (
 )
 
 ROLE_RANK: dict[str, int] = {"public": 0, "owner": 1}
+
+# Synthetic status a gate tool returns when its synchronous backend phase
+# (search / compose) outran the read timeout. The run is still advancing
+# server-side (durable state, D-104); the client recovers by polling
+# get_run_status until the next gate opens. Not a backend RunStatus value.
+PROCESSING_STATUS = "processing"
 
 # Default cap on candidates returned by get_run_status. The sources gate is the
 # key human decision, so the default is generous — the client LLM can organize a
@@ -138,7 +144,16 @@ def make_tools(client: GarApiClient) -> list[McpTool]:
         run_id; the run then waits at the concept gate — poll get_run_status."""
         if not notes:
             raise GarApiError("start_survey requires at least one note.")
-        data = await client.create_run([n.model_dump() for n in notes])
+        try:
+            data = await client.create_run([n.model_dump() for n in notes])
+        except GarApiTimeout as exc:
+            # Concept derivation outran the timeout. The run was likely created
+            # but its id wasn't returned; recover it via list_runs.
+            raise GarApiError(
+                "start_survey timed out while deriving the concept. The run may "
+                "have been created — call list_runs to find the newest run and "
+                "poll get_run_status."
+            ) from exc
         return StartSurveyResult(run_id=data["run_id"], status=data["status"])
 
     async def list_runs() -> list[RunSummary]:
@@ -194,22 +209,32 @@ def make_tools(client: GarApiClient) -> list[McpTool]:
     ) -> GateResult:
         """Gate 1: approve the derived concept as-is, or replace it with an
         edited version (action='edit' requires edited_concept). The run then
-        searches and advances to the sources gate."""
+        searches and advances to the sources gate. The search can run long; if
+        this returns status='processing', the run is still working — poll
+        get_run_status until current_gate is 'sources'."""
         if action == "edit":
             if not edited_concept or not edited_concept.strip():
                 raise GarApiError("action='edit' requires a non-empty edited_concept.")
             edited = edited_concept
         else:
             edited = None
-        data = await client.gate_concept(run_id, edited_concept=edited)
+        try:
+            data = await client.gate_concept(run_id, edited_concept=edited)
+        except GarApiTimeout:
+            return GateResult(run_id=run_id, status=PROCESSING_STATUS)
         return GateResult(run_id=run_id, status=data["status"])
 
     async def select_sources(run_id: str, adopted_ids: list[str]) -> GateResult:
         """Gate 2: choose which candidate sources to adopt, by id
         (source_name:external_id from get_run_status). An empty list adopts
         none. The run then composes the report and advances to the report
-        gate."""
-        data = await client.gate_sources(run_id, adopted_source_ids=adopted_ids)
+        gate. Compose can run long; if this returns status='processing', the
+        run is still working — poll get_run_status until current_gate is
+        'report'."""
+        try:
+            data = await client.gate_sources(run_id, adopted_source_ids=adopted_ids)
+        except GarApiTimeout:
+            return GateResult(run_id=run_id, status=PROCESSING_STATUS)
         return GateResult(run_id=run_id, status=data["status"])
 
     async def approve_report(

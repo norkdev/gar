@@ -4,7 +4,7 @@ import json
 
 import httpx
 import pytest
-from gar_backend.mcp_server.client import GarApiClient, GarApiError
+from gar_backend.mcp_server.client import GarApiClient, GarApiError, GarApiTimeout
 
 from tests.mcp_server.conftest import make_client, recording_handler
 
@@ -104,6 +104,36 @@ async def test_409_explains_wrong_state() -> None:
     with pytest.raises(GarApiError) as ei:
         await client.gate_concept("r1", edited_concept=None)
     assert "not in the right state" in str(ei.value)
+    await client.aclose()
+
+
+async def test_read_timeout_becomes_recoverable_timeout() -> None:
+    """A read timeout means the backend is still working, not that it failed —
+    surfaced as the recoverable GarApiTimeout (D-104)."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise httpx.ReadTimeout("read timed out")
+
+    client = GarApiClient(
+        base_url="http://test", transport=httpx.MockTransport(handler)
+    )
+    with pytest.raises(GarApiTimeout) as ei:
+        await client.gate_concept("r1", edited_concept=None)
+    assert "poll get_run_status" in str(ei.value)
+    await client.aclose()
+
+
+async def test_connect_timeout_is_unreachable_not_recoverable() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectTimeout("connect timed out")
+
+    client = GarApiClient(
+        base_url="http://test", transport=httpx.MockTransport(handler)
+    )
+    with pytest.raises(GarApiError) as ei:
+        await client.list_runs()
+    assert not isinstance(ei.value, GarApiTimeout)
+    assert "Cannot reach" in str(ei.value)
     await client.aclose()
 
 
