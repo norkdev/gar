@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import logging
 import math
+import os
 from typing import Any
 
 import httpx
@@ -39,6 +40,26 @@ DEFAULT_EMBED_MODEL = "voyage-3.5"
 # Per-request text cap. Providers limit batch size; 100 is well within Voyage's.
 EMBED_BATCH = 100
 EMBED_TIMEOUT_SEC = 60.0
+
+# How many top-relevance candidates to cluster into directions. The candidate
+# list arrives in rerank (relevance) order; we cluster only its head. An arXiv
+# pull's tail is often far off-topic (e.g. stray physics papers), and the
+# deterministic maximin seeding picks the *farthest* points as cluster seeds —
+# so leaving the tail in makes those outliers the seeds and collapses every
+# on-topic paper into one mega-cluster (observed live: 302/9/7/4/3/3). Capping
+# to the relevant head keeps the directions balanced and on-topic; tail
+# candidates simply get no direction. Override with GAR_DIRECTIONS_POOL.
+DEFAULT_CLUSTER_POOL = 200
+
+
+def _cluster_pool_cap() -> int:
+    override = os.environ.get("GAR_DIRECTIONS_POOL")
+    if override:
+        try:
+            return max(1, int(override))
+        except ValueError:
+            pass
+    return DEFAULT_CLUSTER_POOL
 
 
 class EmbeddingError(Exception):
@@ -168,18 +189,21 @@ class EmbeddingReranker:
         self, query: str, candidates: list[dict[str, Any]], *, k: int | None = None
     ) -> Directions:
         """Cluster the pool into semantic directions for the report's
-        positioning section (slice 3, part B). Reuses the cached document
-        embeddings from ``rank`` — no extra API call. Returns empty directions
-        if embeddings are unavailable (the report then omits the map)."""
+        positioning section (slice 3, part B). Clusters only the top-relevance
+        head of the pool (see DEFAULT_CLUSTER_POOL) so the off-topic tail can't
+        seed clusters. Reuses the cached document embeddings from ``rank`` — no
+        extra API call. Returns empty directions if embeddings are unavailable
+        (the report then omits the map)."""
         if not candidates:
             return Directions()
+        pool = candidates[: _cluster_pool_cap()]
         try:
             doc_vecs = self._client.embed(
-                [_candidate_text(c) for c in candidates], input_type="document"
+                [_candidate_text(c) for c in pool], input_type="document"
             )
             query_vec = self._client.embed([query], input_type="query")[0]
         except EmbeddingError as exc:
             logger.warning("directions clustering skipped (%s)", exc)
             return Directions()
-        ids = [_candidate_key(c) for c in candidates]
+        ids = [_candidate_key(c) for c in pool]
         return cluster_directions(query_vec, doc_vecs, ids, k=k)

@@ -467,16 +467,28 @@ async def phase_search(state: RunState, ctx: AgentContext) -> RunState:
         result = analyze(concept, ranked)
         if result.directions:
             title_by_id = {_candidate_key(c): c.get("title", "") for c in ranked}
-            directions = [
-                {
-                    "representatives": [
-                        title_by_id.get(rid, rid) for rid in d.representatives
-                    ],
-                    "size": len(d.candidate_ids),
-                    "contains_concept": d.contains_concept,
-                }
-                for d in result.directions
-            ]
+            # Each direction gets a stable id; record which direction each
+            # candidate landed in so the sources gate can group the pool (the
+            # web UI has no LLM to organize it the way an MCP client does).
+            dir_of_candidate: dict[str, int] = {}
+            directions = []
+            for i, d in enumerate(result.directions):
+                directions.append(
+                    {
+                        "id": i,
+                        "representatives": [
+                            title_by_id.get(rid, rid) for rid in d.representatives
+                        ],
+                        "size": len(d.candidate_ids),
+                        "contains_concept": d.contains_concept,
+                    }
+                )
+                for cid in d.candidate_ids:
+                    dir_of_candidate[cid] = i
+            # Annotate in rerank order; a candidate dropped as cluster noise
+            # (tiny cluster) gets direction=None and falls to an "other" group.
+            for c in ranked:
+                c["direction"] = dir_of_candidate.get(_candidate_key(c))
             state = replace(state, context={**state.context, "directions": directions})
 
     return request_source_selection(state, candidates=ranked)

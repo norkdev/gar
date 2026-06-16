@@ -192,6 +192,32 @@ def test_analyze_directions_clusters_pool() -> None:
     assert frozenset({"arxiv:b0", "arxiv:b1", "arxiv:b2"}) in clusters
 
 
+def test_analyze_directions_caps_offtopic_tail(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Only the top-relevance head is clustered. The candidate list is in rerank
+    order, so the off-topic tail sits last; clustering it would let the maximin
+    seeding pick those far outliers as seeds and collapse the on-topic papers
+    into one mega-cluster (observed live). Capping the pool drops the tail."""
+    monkeypatch.setenv("GAR_DIRECTIONS_POOL", "6")
+    on = [_cand(f"a{i}", f"alpha {i}") for i in range(3)] + [
+        _cand(f"b{i}", f"beta {i}") for i in range(3)
+    ]
+    tail = [_cand(f"x{i}", f"outlier {i}") for i in range(3)]  # far, low-relevance
+    vectors = {"q": [1.0, 0.0]}
+    for i in range(3):
+        vectors[f"alpha {i} "] = [1.0, i * 0.01]
+        vectors[f"beta {i} "] = [0.0, 1.0 - i * 0.01]
+        vectors[f"outlier {i} "] = [-1.0, -1.0]  # would seed a cluster if included
+    reranker = EmbeddingReranker(_StubEmbeddingClient(vectors))  # type: ignore[arg-type]
+    result = reranker.analyze_directions("q", on + tail, k=2)
+    clustered = {cid for d in result.directions for cid in d.candidate_ids}
+    # The capped-out tail is absent; the on-topic head split into two clusters.
+    assert clustered == {f"arxiv:a{i}" for i in range(3)} | {
+        f"arxiv:b{i}" for i in range(3)
+    }
+
+
 def test_analyze_directions_empty_on_error() -> None:
     reranker = EmbeddingReranker(_FailingClient())  # type: ignore[arg-type]
     assert reranker.analyze_directions("q", [_cand("a", "x")]).directions == []
