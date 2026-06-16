@@ -138,14 +138,19 @@ class _FailingClient:
         raise EmbeddingError("api down")
 
 
-def test_embedding_reranker_falls_back_on_error() -> None:
-    """If embeddings fail, the run still gets a (lexical) ranking, not a crash."""
+def test_embedding_reranker_falls_back_on_error(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """If embeddings fail, the run still gets a (lexical) ranking, not a crash —
+    and the degradation is logged, not silent."""
     cands = [_cand("a", "Sourdough"), _cand("b", "Widget concept system", "widget")]
     reranker = EmbeddingReranker(_FailingClient())  # type: ignore[arg-type]
-    ranked = reranker.rank("widget concept", cands)
+    with caplog.at_level("WARNING"):
+        ranked = reranker.rank("widget concept", cands)
     # Fell back to BM25: the concept-matching candidate ranks first.
     assert ranked[0]["external_id"] == "b"
     assert {c["external_id"] for c in ranked} == {"a", "b"}
+    assert any("falling back to lexical" in r.message for r in caplog.records)
 
 
 # ---------- make_reranker (env selection) ----------

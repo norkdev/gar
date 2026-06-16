@@ -18,12 +18,15 @@ OpenAI-style ``data[].embedding`` so other providers work too.
 
 from __future__ import annotations
 
+import logging
 import math
 from typing import Any
 
 import httpx
 
 from gar_backend.retrieval.rerank import BM25Reranker, Reranker, _candidate_text
+
+logger = logging.getLogger(__name__)
 
 DEFAULT_EMBED_URL = "https://api.voyageai.com/v1/embeddings"
 DEFAULT_EMBED_MODEL = "voyage-3.5"
@@ -127,7 +130,16 @@ class EmbeddingReranker:
                 [_candidate_text(c) for c in candidates], input_type="document"
             )
             query_vec = self._client.embed([query], input_type="query")[0]
-        except EmbeddingError:
+        except EmbeddingError as exc:
+            # Degrade gracefully — but loudly. A silent fall-through would leave
+            # the operator thinking semantic rerank ran when it didn't (e.g. a
+            # rate limit or auth error sends every run back to lexical ranking).
+            logger.warning(
+                "embedding rerank failed (%s); falling back to lexical BM25 "
+                "for %d candidates",
+                exc,
+                len(candidates),
+            )
             return self._fallback.rank(query, candidates)
         scores = [_cosine(query_vec, doc) for doc in doc_vecs]
         order = sorted(range(len(candidates)), key=lambda i: -scores[i])
