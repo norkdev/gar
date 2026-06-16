@@ -17,6 +17,7 @@ drop the low-relevance tail rather than an arbitrary slice.
 from __future__ import annotations
 
 import math
+import os
 import re
 from typing import Any, Protocol
 
@@ -151,3 +152,34 @@ class BM25Reranker:
             denom = freq + self.k1 * (1 - self.b + self.b * dl / avgdl)
             score += idf.get(term, 0.0) * (freq * (self.k1 + 1)) / denom
         return score
+
+
+def make_reranker() -> Reranker:
+    """Select the reranker from the environment (v1.3 slice 2).
+
+    Default is the dependency-free lexical ``BM25Reranker``. Set
+    ``GAR_RERANKER=embedding`` to opt into semantic reranking via an external
+    embeddings API (``GAR_EMBED_API_KEY`` / ``VOYAGE_API_KEY``, optional
+    ``GAR_EMBED_MODEL`` / ``GAR_EMBED_URL``). If embedding is requested but no
+    key is configured, fall back to BM25 rather than failing — the wiring stays
+    valid whether or not the key is set.
+    """
+    if os.environ.get("GAR_RERANKER", "bm25").strip().lower() != "embedding":
+        return BM25Reranker()
+    api_key = os.environ.get("GAR_EMBED_API_KEY") or os.environ.get("VOYAGE_API_KEY")
+    if not api_key:
+        return BM25Reranker()
+    # Imported lazily so the common BM25 path never imports the embedding module.
+    from gar_backend.retrieval.embedding import (
+        DEFAULT_EMBED_MODEL,
+        DEFAULT_EMBED_URL,
+        EmbeddingClient,
+        EmbeddingReranker,
+    )
+
+    client = EmbeddingClient(
+        api_key=api_key,
+        model=os.environ.get("GAR_EMBED_MODEL", DEFAULT_EMBED_MODEL),
+        base_url=os.environ.get("GAR_EMBED_URL", DEFAULT_EMBED_URL),
+    )
+    return EmbeddingReranker(client)
