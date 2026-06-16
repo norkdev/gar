@@ -435,3 +435,22 @@ swap、spec §10 seam)は維持。
 
 **未実装(将来)**: 動的エスカレーション(grounding リトライ時のみ compose を昇格)、
 コスト計測の監査集計。
+
+---
+
+## 8. derived concept の可読性(2026-06-16)
+
+**背景**: gate1 で人間が読む derived concept が密な散文 1 ブロックで、ファセットが
+読み取りにくかった。可読性を上げたいが、concept は **retrieval の入力**でもある
+(`phase_search` のプロンプト＋`reranker.rank(concept, …)` のクエリ)ため精度低下を懸念。
+
+**判断**: `DERIVE_CONCEPT_SYSTEM` を「短いリード文(1-2 文)＋ファセット箇条書き」を
+出すよう変更。**懸念は形式ではなく内容欠落**と整理: embedding rerank は concept 全体を
+1 ベクトル化、BM25 は bag-of-words ── どちらも**語彙**依存でレイアウト非依存。箇条書き化で
+固有の技術語(sub-profile, confidence threshold 等)が落ちると rerank クエリの弁別力が
+下がるため、プロンプトに**固有語を verbatim 保持**する指示を明記。加えて原文フレーズ
+注入(§5)が retrieval を別経路で裏打ちしており、concept 散文への依存はそもそも部分的。
+
+**live 検証(2026-06-16, 同じ agent.md)**: リード文＋8 ファセット箇条書きで出力、固有語
+保持を確認。recall は 281 件(散文版 313 件)── エージェント検索のクエリ揺らぎの範囲内で
+有意な低下なし、TOP は PersonaX(中核の user-modeling)で関連度も維持。

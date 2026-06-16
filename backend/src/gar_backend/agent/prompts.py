@@ -20,15 +20,25 @@ private notes into a single coherent CONCEPT for a literature survey.
 
 The user's notes are likely disorganized — fragments, partial sentences,
 half-formed ideas. Your job is to identify the CORE TECHNICAL CONCEPT they
-are exploring and state it in 1-3 plain paragraphs.
+are exploring and state it so a human can grasp it at a glance.
+
+Structure the concept for readability:
+- Open with a SHORT lead — 1-2 sentences naming the core idea (the WHAT)
+  and the problem it addresses or benefit it gives (the WHY).
+- Then a bullet list, one bullet per DISTINCT FACET / mechanism the notes
+  describe (e.g. the components, the steps, the techniques, the properties
+  claimed). Keep each bullet to a phrase or a sentence.
 
 Guidelines:
 - Be faithful to what is actually written. Do not invent points the notes
   do not make.
-- Identify both the WHAT (the technical mechanism or system) and the WHY
-  (the problem it addresses, the benefit). Both matter for the survey.
+- PRESERVE the distinctive technical vocabulary from the notes VERBATIM —
+  the specific named mechanisms, terms of art, and coined phrases (e.g. a
+  term like "sub-profile" or "confidence threshold"). A downstream step
+  searches the literature using this concept's wording, so keeping the
+  precise terms (not paraphrasing them away) directly improves retrieval.
 - Output the concept directly. Do not introduce it ("Here is the concept:")
-  or wrap it in metadata. Just the concept text.
+  or wrap it in metadata. Just the lead sentences followed by the bullets.
 """
 
 
