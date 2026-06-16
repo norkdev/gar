@@ -82,6 +82,14 @@ def _candidate_text(candidate: dict[str, Any]) -> str:
     return f"{candidate.get('title', '')} {candidate.get('snippet', '')}"
 
 
+def _candidate_key(candidate: dict[str, Any]) -> str:
+    """Identity of a candidate for dedup and provenance: source:external_id.
+
+    Shared by the agent loop (dedup/provenance) and the retrieval modules so
+    candidate ids line up across them."""
+    return f"{candidate.get('source_name', '')}:{candidate.get('external_id', '')}"
+
+
 class Reranker(Protocol):
     """Reorder candidates by descending relevance to ``query``.
 

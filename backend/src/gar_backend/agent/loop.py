@@ -59,7 +59,7 @@ from gar_backend.governance.rbac import AccessContext, ToolRegistry
 from gar_backend.ideas.reader import IdeaDocument, UnsupportedFileType, read
 from gar_backend.ideas.walker import walk
 from gar_backend.reports.linkify import linkify_report
-from gar_backend.retrieval.rerank import Reranker, make_reranker
+from gar_backend.retrieval.rerank import Reranker, _candidate_key, make_reranker
 from gar_backend.sources.base import SearchResult
 from gar_backend.state.runs import RunStore
 
@@ -456,6 +456,29 @@ async def phase_search(state: RunState, ctx: AgentContext) -> RunState:
         for key, doc in seen.items()
     ]
     ranked = ctx.reranker.rank(concept, candidates)
+
+    # Cluster the pool into semantic "directions" for the report's positioning
+    # section (slice 3). Only the embedding reranker can do this; BM25 mode and
+    # any embedding failure leave directions absent and the report omits the
+    # map. Resolve representative ids to titles here, where the pool is in hand,
+    # and carry a compact structure forward in context for the compose phase.
+    analyze = getattr(ctx.reranker, "analyze_directions", None)
+    if analyze is not None:
+        result = analyze(concept, ranked)
+        if result.directions:
+            title_by_id = {_candidate_key(c): c.get("title", "") for c in ranked}
+            directions = [
+                {
+                    "representatives": [
+                        title_by_id.get(rid, rid) for rid in d.representatives
+                    ],
+                    "size": len(d.candidate_ids),
+                    "contains_concept": d.contains_concept,
+                }
+                for d in result.directions
+            ]
+            state = replace(state, context={**state.context, "directions": directions})
+
     return request_source_selection(state, candidates=ranked)
 
 
@@ -479,6 +502,7 @@ async def phase_compose_report(state: RunState, ctx: AgentContext) -> RunState:
         concept=concept,
         adopted_evidence=adopted_evidence_dicts,
         adopted_ids=adopted_ids,
+        directions=state.context.get("directions"),
     )
     messages: list[Message] = [
         Message(
@@ -626,11 +650,34 @@ def _validate_report(
 # ------------- helpers -------------
 
 
+def _directions_block(directions: list[dict[str, Any]] | None) -> str:
+    """Render the embedding-clustered literature directions for the compose
+    prompt (slice 3). The LLM names each cluster from its representative titles
+    and writes the positioning section; the CONCEPT-NEAREST marker tells it
+    where the user's idea sits among them."""
+    if not directions:
+        return ""
+    lines = [
+        "",
+        "Literature directions — semantic clusters of the searched pool "
+        "(computed from embeddings). Name each direction from its papers and "
+        "use them for the positioning section. The cluster marked "
+        "[CONCEPT-NEAREST] is where the user's idea sits:",
+    ]
+    for i, d in enumerate(directions, 1):
+        mark = " [CONCEPT-NEAREST]" if d.get("contains_concept") else ""
+        lines.append(f"- Direction {i} ({d.get('size', 0)} papers){mark}:")
+        for title in d.get("representatives", []):
+            lines.append(f"    • {title}")
+    return "\n".join(lines)
+
+
 def _build_compose_user_text(
     *,
     concept: str,
     adopted_evidence: list[dict[str, Any]],
     adopted_ids: list[str],
+    directions: list[dict[str, Any]] | None = None,
 ) -> str:
     """Compose the user message for ``phase_compose_report``.
 
@@ -644,7 +691,8 @@ def _build_compose_user_text(
         return (
             f"Concept:\n{concept}\n\n"
             "Adopted source IDs (from the candidate list at the previous "
-            f"gate): {adopted_ids if adopted_ids else 'none'}\n\n"
+            f"gate): {adopted_ids if adopted_ids else 'none'}\n"
+            f"{_directions_block(directions)}\n\n"
             "Compose the final report per the structure given in the "
             "system prompt."
         )
@@ -680,6 +728,9 @@ def _build_compose_user_text(
             shown_snippet = snippet if len(snippet) <= cap else snippet[:cap] + "…"
             parts.append(f"  Abstract: {shown_snippet}")
         parts.append("")
+    directions_block = _directions_block(directions)
+    if directions_block:
+        parts.append(directions_block)
     parts.append(
         "Compose the final report per the structure given in the system "
         "prompt. Cite each source using its exact [source_name:external_id] "
@@ -703,11 +754,6 @@ def _assistant_message(response: LLMResponse) -> Message:
             }
         )
     return Message(role="assistant", content=content)
-
-
-def _candidate_key(candidate: dict[str, Any]) -> str:
-    """Identity of a candidate for dedup and provenance: source:external_id."""
-    return f"{candidate.get('source_name', '')}:{candidate.get('external_id', '')}"
 
 
 async def _audited_complete(

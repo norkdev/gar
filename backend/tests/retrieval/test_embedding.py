@@ -74,6 +74,24 @@ def test_embed_raises_on_http_error_status() -> None:
     client.close()
 
 
+def test_embed_caches_repeated_texts() -> None:
+    """A repeated (text, input_type) hits the cache — no second API call — so a
+    later pass (directions clustering) reuses the reranker's embeddings free."""
+    calls: list[list[str]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        batch = json.loads(request.content)["input"]
+        calls.append(batch)
+        return _embed_response([[1.0] for _ in batch])
+
+    client = _client(handler)
+    client.embed(["a", "b"], input_type="document")
+    client.embed(["a"], input_type="document")  # cached → no call
+    client.embed(["a"], input_type="query")  # different type → new call
+    assert calls == [["a", "b"], ["a"]]
+    client.close()
+
+
 def test_embed_raises_on_transport_error() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         raise httpx.ConnectError("refused")
@@ -151,6 +169,37 @@ def test_embedding_reranker_falls_back_on_error(
     assert ranked[0]["external_id"] == "b"
     assert {c["external_id"] for c in ranked} == {"a", "b"}
     assert any("falling back to lexical" in r.message for r in caplog.records)
+
+
+# ---------- make_reranker (env selection) ----------
+
+
+# ---------- EmbeddingReranker.analyze_directions ----------
+
+
+def test_analyze_directions_clusters_pool() -> None:
+    cands = [_cand(f"a{i}", f"alpha {i}") for i in range(3)] + [
+        _cand(f"b{i}", f"beta {i}") for i in range(3)
+    ]
+    vectors = {"q": [1.0, 0.0]}
+    for i in range(3):
+        vectors[f"alpha {i} "] = [1.0, i * 0.01]
+        vectors[f"beta {i} "] = [0.0, 1.0 - i * 0.01]
+    reranker = EmbeddingReranker(_StubEmbeddingClient(vectors))  # type: ignore[arg-type]
+    result = reranker.analyze_directions("q", cands, k=2)
+    clusters = {frozenset(d.candidate_ids) for d in result.directions}
+    assert frozenset({"arxiv:a0", "arxiv:a1", "arxiv:a2"}) in clusters
+    assert frozenset({"arxiv:b0", "arxiv:b1", "arxiv:b2"}) in clusters
+
+
+def test_analyze_directions_empty_on_error() -> None:
+    reranker = EmbeddingReranker(_FailingClient())  # type: ignore[arg-type]
+    assert reranker.analyze_directions("q", [_cand("a", "x")]).directions == []
+
+
+def test_analyze_directions_empty_pool() -> None:
+    reranker = EmbeddingReranker(_StubEmbeddingClient({}))  # type: ignore[arg-type]
+    assert reranker.analyze_directions("q", []).directions == []
 
 
 # ---------- make_reranker (env selection) ----------

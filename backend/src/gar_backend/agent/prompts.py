@@ -121,6 +121,14 @@ The report MUST include these sections, in this order:
    ("the most similar candidate is X; the main differentiator appears to
    be Y"). DO NOT issue a final judgement ("this is novel"). The human
    decides.
+   - If "Literature directions" are provided in the input, OPEN this
+     section with a short **positioning map**: name each direction (from
+     its representative papers), then say where the concept sits among
+     them — which directions it combines, which it extends, whether any
+     single direction already covers it — and note which adopted sources
+     fall in which direction. The directions are the semantic landscape of
+     the searched literature; the adopted sources are the anchors. Keep it
+     hedged: it orients the human's judgement, it does not make it.
 5. **Suggestions for development** — concrete next steps the user might
    consider (further reading, scoping refinements, complementary angles).
 6. **References** — split into "Adopted" and "Not adopted" lists.

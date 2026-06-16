@@ -24,7 +24,13 @@ from typing import Any
 
 import httpx
 
-from gar_backend.retrieval.rerank import BM25Reranker, Reranker, _candidate_text
+from gar_backend.retrieval.directions import Directions, cluster_directions
+from gar_backend.retrieval.rerank import (
+    BM25Reranker,
+    Reranker,
+    _candidate_key,
+    _candidate_text,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -60,6 +66,12 @@ class EmbeddingClient:
         self._model = model
         self._url = base_url
         self._batch = batch_size
+        # Per-instance memo: (input_type, text) -> vector. Lets a later pass
+        # (e.g. directions clustering) reuse the vectors the reranker already
+        # paid for, with no second API call. The client is per-request (one per
+        # AgentContext), so the cache is bounded to one run's pool and freed
+        # with it.
+        self._cache: dict[tuple[str, str], list[float]] = {}
         self._client = httpx.Client(
             headers={
                 "Authorization": f"Bearer {api_key}",
@@ -73,14 +85,21 @@ class EmbeddingClient:
         self._client.close()
 
     def embed(self, texts: list[str], *, input_type: str) -> list[list[float]]:
-        """Embed ``texts`` (batched). ``input_type`` is ``query`` or ``document``
-        for asymmetric retrieval (Voyage); providers that ignore it are fine."""
-        vectors: list[list[float]] = []
-        for start in range(0, len(texts), self._batch):
-            vectors.extend(
-                self._embed_batch(texts[start : start + self._batch], input_type)
-            )
-        return vectors
+        """Embed ``texts`` (batched, cached). ``input_type`` is ``query`` or
+        ``document`` for asymmetric retrieval (Voyage); providers that ignore it
+        are fine."""
+        missing = [t for t in texts if (input_type, t) not in self._cache]
+        if missing:
+            # Dedup while preserving first-seen order for the API call.
+            unique = list(dict.fromkeys(missing))
+            fresh: list[list[float]] = []
+            for start in range(0, len(unique), self._batch):
+                fresh.extend(
+                    self._embed_batch(unique[start : start + self._batch], input_type)
+                )
+            for text, vec in zip(unique, fresh, strict=True):
+                self._cache[(input_type, text)] = vec
+        return [self._cache[(input_type, t)] for t in texts]
 
     def _embed_batch(self, batch: list[str], input_type: str) -> list[list[float]]:
         try:
@@ -144,3 +163,23 @@ class EmbeddingReranker:
         scores = [_cosine(query_vec, doc) for doc in doc_vecs]
         order = sorted(range(len(candidates)), key=lambda i: -scores[i])
         return [candidates[i] for i in order]
+
+    def analyze_directions(
+        self, query: str, candidates: list[dict[str, Any]], *, k: int | None = None
+    ) -> Directions:
+        """Cluster the pool into semantic directions for the report's
+        positioning section (slice 3, part B). Reuses the cached document
+        embeddings from ``rank`` — no extra API call. Returns empty directions
+        if embeddings are unavailable (the report then omits the map)."""
+        if not candidates:
+            return Directions()
+        try:
+            doc_vecs = self._client.embed(
+                [_candidate_text(c) for c in candidates], input_type="document"
+            )
+            query_vec = self._client.embed([query], input_type="query")[0]
+        except EmbeddingError as exc:
+            logger.warning("directions clustering skipped (%s)", exc)
+            return Directions()
+        ids = [_candidate_key(c) for c in candidates]
+        return cluster_directions(query_vec, doc_vecs, ids, k=k)

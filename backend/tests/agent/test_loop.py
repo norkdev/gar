@@ -470,6 +470,66 @@ async def test_search_support_does_not_override_relevance_sort(
     assert cands[0]["external_id"] == "FRONT"
 
 
+async def test_search_stores_directions_from_reranker(tmp_path: Path) -> None:
+    """When the reranker can cluster (embedding mode), phase_search carries a
+    compact directions structure forward in context for the report (slice 3),
+    with representative ids resolved to titles."""
+    from dataclasses import replace as dc_replace
+
+    from gar_backend.retrieval.directions import Direction, Directions
+
+    class _DirReranker:
+        def rank(self, query: str, candidates: list[Any]) -> list[Any]:
+            return candidates
+
+        def analyze_directions(
+            self, query: str, candidates: list[Any], *, k: int | None = None
+        ) -> Directions:
+            return Directions(
+                directions=[
+                    Direction(
+                        candidate_ids=["test_source:D1"],
+                        representatives=["test_source:D1"],
+                        contains_concept=True,
+                    )
+                ]
+            )
+
+    fake = _FakePublicSource(
+        results=[SearchResult("test_source", "D1", "Widget paper", "x", (), None, "")]
+    )
+    registry = ToolRegistry()
+    register_default_tools(registry, public_source=fake)  # type: ignore[arg-type]
+    llm = StubLLM([_tool_use("t1", fake.tool_name, {"query": "q"}), _text("done")])
+    ctx = dc_replace(
+        _build_ctx(tmp_path, llm, registry=registry), reranker=_DirReranker()
+    )
+
+    new = await phase_search(_state_at_searching(tmp_path), ctx)
+    dirs = new.context.get("directions")
+    assert dirs and dirs[0]["representatives"] == ["Widget paper"]
+    assert dirs[0]["contains_concept"] is True
+    assert dirs[0]["size"] == 1
+
+
+def test_compose_user_text_includes_directions_map() -> None:
+    text = loop._build_compose_user_text(
+        concept="c",
+        adopted_evidence=[],
+        adopted_ids=["arxiv:1"],
+        directions=[
+            {
+                "representatives": ["Paper A", "Paper B"],
+                "size": 5,
+                "contains_concept": True,
+            }
+        ],
+    )
+    assert "Literature directions" in text
+    assert "[CONCEPT-NEAREST]" in text
+    assert "Paper A" in text
+
+
 # ---------- phase_compose_report ----------
 
 
