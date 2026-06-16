@@ -58,7 +58,7 @@ from gar_backend.governance.rbac import AccessContext, ToolRegistry
 from gar_backend.ideas.reader import IdeaDocument, UnsupportedFileType, read
 from gar_backend.ideas.walker import walk
 from gar_backend.reports.linkify import linkify_report
-from gar_backend.retrieval.rerank import BM25Reranker, Reranker
+from gar_backend.retrieval.rerank import Reranker, make_reranker
 from gar_backend.sources.base import SearchResult
 from gar_backend.state.runs import RunStore
 
@@ -78,8 +78,9 @@ class AgentContext:
     # before stopping (spec §5; recall is the priority for novelty survey).
     max_search_iterations: int = 6
     # Orders the candidate pool by concept-relevance before the sources gate
-    # (spec §5 swap point). Default lexical BM25; no external dependency.
-    reranker: Reranker = field(default_factory=BM25Reranker)
+    # (spec §5 swap point). Selected from the environment: dependency-free BM25
+    # by default, or an embedding reranker when GAR_RERANKER=embedding.
+    reranker: Reranker = field(default_factory=make_reranker)
 
 
 # Retry configuration for transient rate-limit errors from the LLM client.
