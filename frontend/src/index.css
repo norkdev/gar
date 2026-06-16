@@ -212,9 +212,9 @@ textarea:focus {
 textarea {
   resize: vertical;
   min-height: 11rem;
-  /* Serif at the same px reads visually smaller than sans, so bump the
-   * size of long-form editable text. */
-  font-family: var(--font-serif);
+  /* Sans-serif for consistency with the rest of the app; a slightly larger
+   * size keeps long-form editable text comfortable to read. */
+  font-family: var(--font-sans);
   font-size: var(--fs-lg);
   line-height: var(--lh-relaxed);
 }
@@ -600,7 +600,7 @@ pre.report {
   border-radius: var(--radius-md);
   max-height: 40rem;
   overflow-y: auto;
-  font-family: var(--font-serif);
+  font-family: var(--font-sans);
   font-size: var(--fs-md);
   line-height: var(--lh-relaxed);
   color: var(--color-text);
