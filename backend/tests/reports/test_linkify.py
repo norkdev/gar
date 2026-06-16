@@ -31,6 +31,25 @@ def test_citation_appearing_in_body_and_references_both_get_linkified() -> None:
     assert out.count(r"\[[arxiv:1.1](https://arxiv.org/abs/1.1)\]") == 2
 
 
+def test_backtick_wrapped_citation_strips_code_span() -> None:
+    """An LLM that formats a citation as inline `code` would otherwise render
+    the link literally — Markdown never parses links inside a code span. The
+    wrapping backticks are dropped so the citation linkifies and renders."""
+    report = "Adopted: `[arxiv:1.1]` — Title."
+    out = linkify_report(
+        report, _evidence(("arxiv", "1.1", "https://arxiv.org/abs/1.1"))
+    )
+    assert r"\[[arxiv:1.1](https://arxiv.org/abs/1.1)\]" in out
+    assert "`" not in out  # the code-span backticks are gone
+
+
+def test_backtick_wrapped_unknown_citation_left_untouched() -> None:
+    """If we can't linkify it (no URL), leave the text — backticks and all."""
+    report = "See `[foo:99]` here."
+    out = linkify_report(report, [])
+    assert out == report
+
+
 def test_citation_without_evidence_kept_as_plain_text() -> None:
     """An unrelated `[foo:99]` in the body has no URL to link to and stays as-is."""
     report = "Statement [foo:99] not in evidence."

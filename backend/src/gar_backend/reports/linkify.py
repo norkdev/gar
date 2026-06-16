@@ -23,7 +23,11 @@ from __future__ import annotations
 import re
 from typing import Any
 
-CITATION_PATTERN = re.compile(r"\[([A-Za-z][A-Za-z0-9_-]*):([^\]\s]+)\]")
+# Optional leading/trailing backticks are captured so we can drop them: an LLM
+# sometimes formats a citation as inline ``code`` (e.g. `[arxiv:1]`), and
+# Markdown never parses a link inside a code span — the linkified citation would
+# render literally. When a citation is wrapped in backticks we strip them.
+CITATION_PATTERN = re.compile(r"(`*)\[([A-Za-z][A-Za-z0-9_-]*):([^\]\s]+)\](`*)")
 
 
 def linkify_report(report: str, adopted_evidence: list[dict[str, Any]]) -> str:
@@ -34,10 +38,15 @@ def linkify_report(report: str, adopted_evidence: list[dict[str, Any]]) -> str:
     }
 
     def repl(m: re.Match[str]) -> str:
-        source, ext_id = m.group(1), m.group(2)
+        lead, source, ext_id, trail = m.group(1), m.group(2), m.group(3), m.group(4)
         url = url_by_key.get((source, ext_id), "")
         if not url:
             return m.group(0)
-        return rf"\[[{source}:{ext_id}]({url})\]"
+        link = rf"\[[{source}:{ext_id}]({url})\]"
+        # Drop wrapping backticks only when symmetric (the citation was the whole
+        # inline-code span), so a larger surrounding code span is left intact.
+        if lead and trail:
+            return link
+        return f"{lead}{link}{trail}"
 
     return CITATION_PATTERN.sub(repl, report)
