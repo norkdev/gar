@@ -510,6 +510,10 @@ async def test_search_stores_directions_from_reranker(tmp_path: Path) -> None:
     assert dirs and dirs[0]["representatives"] == ["Widget paper"]
     assert dirs[0]["contains_concept"] is True
     assert dirs[0]["size"] == 1
+    assert dirs[0]["id"] == 0
+    # The candidate is annotated with its direction so the gate can group it.
+    cand = new.pending_payload["candidates"][0]
+    assert cand["direction"] == 0
 
 
 def test_compose_user_text_includes_directions_map() -> None:

@@ -21,6 +21,7 @@ def _hermetic_reranker_env(monkeypatch: pytest.MonkeyPatch) -> None:
         "GAR_EMBED_URL",
         "GAR_EMBED_MODEL",
         "GAR_DIRECTIONS_K",
+        "GAR_DIRECTIONS_POOL",
         "GAR_MODEL_DERIVE",
         "GAR_MODEL_SEARCH",
         "GAR_MODEL_COMPOSE",

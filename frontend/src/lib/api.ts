@@ -23,6 +23,20 @@ export interface Candidate {
   published: string | null;
   url: string;
   citation_anchor: string | null;
+  // Index of the semantic direction (cluster) this candidate fell in, or
+  // null/undefined when directions weren't computed (BM25 mode) or it was
+  // dropped as cluster noise. See `Direction` and context.directions.
+  direction?: number | null;
+}
+
+// One semantic cluster of the candidate pool (embedding directions, slice 3),
+// carried in run context. Used to group the sources gate so the human reviews
+// by relevance cluster instead of one long flat list.
+export interface Direction {
+  id: number;
+  representatives: string[];
+  size: number;
+  contains_concept: boolean;
 }
 
 export interface RunState {
