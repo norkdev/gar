@@ -9,8 +9,10 @@ from gar_backend.agent import loop
 from gar_backend.agent.llm import LLMResponse, Message, RateLimitError, ToolUse
 from gar_backend.agent.loop import (
     AgentContext,
+    ModelPolicy,
     _audited_complete,
     create_run,
+    make_model_policy,
     phase_compose_report,
     phase_derive_concept,
     phase_search,
@@ -99,6 +101,7 @@ def _build_ctx(
     *,
     registry: ToolRegistry | None = None,
     max_search_iterations: int = 10,
+    models: ModelPolicy | None = None,
 ) -> AgentContext:
     return AgentContext(
         llm=llm,
@@ -106,7 +109,7 @@ def _build_ctx(
         audit=AuditLogger(FileAuditSink(tmp_path / "audit.jsonl")),
         store=InMemoryRunStore(),
         access=AccessContext(tenant_id="default", role="owner"),
-        model="claude-test",
+        models=models or ModelPolicy("claude-test", "claude-test", "claude-test"),
         max_search_iterations=max_search_iterations,
     )
 
@@ -754,6 +757,7 @@ async def test_audited_complete_logs_success_record(tmp_path: Path) -> None:
     await _audited_complete(
         ctx,
         "r1",
+        model="claude-test",
         system="sys",
         messages=[Message("user", [{"type": "text", "text": "x"}])],
         tools=[],
@@ -778,7 +782,9 @@ async def test_audited_complete_logs_error_and_reraises(
     ctx = _build_ctx(tmp_path, BoomLLM())
 
     with pytest.raises(RuntimeError, match="kaboom"):
-        await _audited_complete(ctx, "r1", system="", messages=[], tools=[])
+        await _audited_complete(
+            ctx, "r1", model="claude-test", system="", messages=[], tools=[]
+        )
 
     record = json.loads((tmp_path / "audit.jsonl").read_text())
     assert record["status"] == "error"
@@ -801,6 +807,7 @@ async def test_audited_complete_retries_on_rate_limit_then_succeeds(
     response = await _audited_complete(
         ctx,
         "r1",
+        model="claude-test",
         system="",
         messages=[],
         tools=[],
@@ -836,6 +843,7 @@ async def test_audited_complete_propagates_after_max_attempts(
         await _audited_complete(
             ctx,
             "r1",
+            model="claude-test",
             system="",
             messages=[],
             tools=[],
@@ -858,6 +866,7 @@ async def test_audited_complete_does_not_retry_on_non_rate_limit(
         await _audited_complete(
             ctx,
             "r1",
+            model="claude-test",
             system="",
             messages=[],
             tools=[],
@@ -865,3 +874,90 @@ async def test_audited_complete_does_not_retry_on_non_rate_limit(
 
     lines = (tmp_path / "audit.jsonl").read_text().splitlines()
     assert len(lines) == 1  # only one attempt logged, no retry
+
+
+# ---------- make_model_policy (per-phase cost tiers) ----------
+
+
+def test_model_policy_defaults_haiku_haiku_sonnet() -> None:
+    policy = make_model_policy()
+    assert policy.derive == "claude-haiku-4-5"
+    assert policy.search == "claude-haiku-4-5"
+    assert policy.compose == "claude-sonnet-4-6"
+
+
+def test_model_policy_env_overrides_each_phase(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("GAR_MODEL_DERIVE", "d-model")
+    monkeypatch.setenv("GAR_MODEL_SEARCH", "s-model")
+    monkeypatch.setenv("GAR_MODEL_COMPOSE", "c-model")
+    policy = make_model_policy()
+    assert (policy.derive, policy.search, policy.compose) == (
+        "d-model",
+        "s-model",
+        "c-model",
+    )
+
+
+def test_model_policy_thorough_escalates_search_to_compose_tier(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("GAR_THOROUGH", "1")
+    policy = make_model_policy()
+    assert policy.search == policy.compose == "claude-sonnet-4-6"
+    assert policy.derive == "claude-haiku-4-5"  # derive stays cheap
+
+
+def test_model_policy_explicit_search_wins_over_thorough(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("GAR_THOROUGH", "true")
+    monkeypatch.setenv("GAR_MODEL_SEARCH", "explicit-search")
+    assert make_model_policy().search == "explicit-search"
+
+
+# ---------- each phase calls the LLM with its tier model ----------
+
+
+async def test_derive_uses_derive_tier_model(tmp_path: Path) -> None:
+    (tmp_path / "idea.md").write_text("Half-formed idea about widgets.")
+    llm = StubLLM([_text("Concept: a widget system.")])
+    ctx = _build_ctx(
+        tmp_path, llm, models=ModelPolicy("derive-m", "search-m", "compose-m")
+    )
+
+    state = create_run(run_id="r1", tenant_id="default", vault_path=tmp_path)
+    await phase_derive_concept(state, ctx, vault_path=tmp_path)
+
+    assert llm.calls[-1]["model"] == "derive-m"
+
+
+async def test_search_uses_search_tier_model(tmp_path: Path) -> None:
+    fake = _FakePublicSource(results=[])
+    registry = ToolRegistry()
+    register_default_tools(registry, public_source=fake)  # type: ignore[arg-type]
+    llm = StubLLM([_text("Done.")])
+    ctx = _build_ctx(
+        tmp_path,
+        llm,
+        registry=registry,
+        models=ModelPolicy("derive-m", "search-m", "compose-m"),
+    )
+
+    state = _state_at_searching(tmp_path)
+    await phase_search(state, ctx)
+
+    assert all(c["model"] == "search-m" for c in llm.calls)
+
+
+async def test_compose_uses_compose_tier_model(tmp_path: Path) -> None:
+    llm = StubLLM([_text("# Report\n\nNo citations needed.")])
+    ctx = _build_ctx(
+        tmp_path, llm, models=ModelPolicy("derive-m", "search-m", "compose-m")
+    )
+
+    state = _state_at_evaluating(tmp_path)
+    await phase_compose_report(state, ctx)
+
+    assert llm.calls[-1]["model"] == "compose-m"
