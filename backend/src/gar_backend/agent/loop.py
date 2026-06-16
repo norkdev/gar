@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import time
 from dataclasses import dataclass, field, replace
 from pathlib import Path
@@ -62,6 +63,49 @@ from gar_backend.retrieval.rerank import Reranker, make_reranker
 from gar_backend.sources.base import SearchResult
 from gar_backend.state.runs import RunStore
 
+# Per-phase model tiers (cost control). Haiku for the cheap, lower-stakes /
+# token-heavy phases; Sonnet for the deliverable the human reads.
+# - derive: low stakes — the human reviews/edits the concept at gate 1.
+# - search: the token-heaviest phase (abstracts accumulate in context), so the
+#   biggest savings; recall is partly protected by the breadth prompt, the
+#   embedding rerank, and the human's gate-2 selection.
+# - compose: the report the human reads — citation discipline, hedged synthesis,
+#   the positioning map. Weaker models mangle citations and trigger grounding
+#   retries, so spend here.
+DEFAULT_DERIVE_MODEL = "claude-haiku-4-5"
+DEFAULT_SEARCH_MODEL = "claude-haiku-4-5"
+DEFAULT_COMPOSE_MODEL = "claude-sonnet-4-6"
+
+
+@dataclass(frozen=True)
+class ModelPolicy:
+    """Which model each phase uses."""
+
+    derive: str = DEFAULT_DERIVE_MODEL
+    search: str = DEFAULT_SEARCH_MODEL
+    compose: str = DEFAULT_COMPOSE_MODEL
+
+
+def make_model_policy() -> ModelPolicy:
+    """Resolve per-phase models from the environment.
+
+    Defaults: Haiku for derive + search, Sonnet for compose. Override any phase
+    with GAR_MODEL_DERIVE / GAR_MODEL_SEARCH / GAR_MODEL_COMPOSE. GAR_THOROUGH
+    escalates the recall-sensitive search phase to the compose-tier model for a
+    high-stakes survey (an explicit GAR_MODEL_SEARCH still wins)."""
+    compose = os.environ.get("GAR_MODEL_COMPOSE", DEFAULT_COMPOSE_MODEL)
+    thorough = os.environ.get("GAR_THOROUGH", "").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+    )
+    search_default = compose if thorough else DEFAULT_SEARCH_MODEL
+    return ModelPolicy(
+        derive=os.environ.get("GAR_MODEL_DERIVE", DEFAULT_DERIVE_MODEL),
+        search=os.environ.get("GAR_MODEL_SEARCH", search_default),
+        compose=compose,
+    )
+
 
 @dataclass(frozen=True)
 class AgentContext:
@@ -72,7 +116,8 @@ class AgentContext:
     audit: AuditLogger
     store: RunStore
     access: AccessContext
-    model: str = "claude-sonnet-4-6"
+    # Per-phase model tiers (cost control); see make_model_policy.
+    models: ModelPolicy = field(default_factory=make_model_policy)
     # Number of search turns the agent gets. Raised from 4 to 6 to favor
     # recall — more rounds let the agent cover more facets / query wordings
     # before stopping (spec §5; recall is the priority for novelty survey).
@@ -227,6 +272,7 @@ async def phase_derive_concept(
     response = await _audited_complete(
         ctx,
         state.run_id,
+        model=ctx.models.derive,
         system=DERIVE_CONCEPT_SYSTEM,
         messages=[
             Message(
@@ -341,6 +387,7 @@ async def phase_search(state: RunState, ctx: AgentContext) -> RunState:
         response = await _audited_complete(
             ctx,
             state.run_id,
+            model=ctx.models.search,
             system=SEARCH_SYSTEM,
             messages=messages,
             tools=tool_definitions,
@@ -446,6 +493,7 @@ async def phase_compose_report(state: RunState, ctx: AgentContext) -> RunState:
         response = await _audited_complete(
             ctx,
             state.run_id,
+            model=ctx.models.compose,
             system=COMPOSE_REPORT_SYSTEM,
             messages=messages,
             tools=[],
@@ -666,6 +714,7 @@ async def _audited_complete(
     ctx: AgentContext,
     run_id: str,
     *,
+    model: str,
     system: str,
     messages: list[Message],
     tools: list[ToolDefinition],
@@ -673,13 +722,15 @@ async def _audited_complete(
 ) -> LLMResponse:
     """Call the LLM with audit logging and retry-on-rate-limit.
 
-    Each attempt — success or failure — produces an audit record. On
-    RateLimitError we sleep (using the provider's retry-after if given,
-    else exponential back-off) and try again, up to RETRY_MAX_ATTEMPTS.
-    Other exceptions are logged once and re-raised immediately.
+    ``model`` is the per-phase tier (see ModelPolicy). Each attempt — success
+    or failure — produces an audit record that records the model used, so a
+    run's trace shows which tier ran each call. On RateLimitError we sleep
+    (using the provider's retry-after if given, else exponential back-off) and
+    try again, up to RETRY_MAX_ATTEMPTS. Other exceptions are logged once and
+    re-raised immediately.
     """
     base_input = {
-        "model": ctx.model,
+        "model": model,
         "message_count": len(messages),
         "tool_count": len(tools),
         "max_tokens": max_tokens,
@@ -692,7 +743,7 @@ async def _audited_complete(
                 system=system,
                 messages=messages,
                 tools=tools,
-                model=ctx.model,
+                model=model,
                 max_tokens=max_tokens,
             )
         except RateLimitError as exc:
