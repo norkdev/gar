@@ -1,11 +1,12 @@
 // Gate 3: review the composed report and approve to finish the run.
 //
 // "Approve & save" opens a native file-save dialog (showSaveFilePicker
-// where supported; standard <a download> fallback on Safari/Firefox)
-// before the gate-transition POST. Cancelling the dialog still
-// completes the run — the save is the user's choice, the approval is
-// the governance step. We save first because once approved the user
-// is navigated away from this screen; the report is otherwise lost.
+// where supported; standard <a download> fallback on Safari/Firefox) and,
+// only if a file was saved, performs the gate-transition POST. Cancelling
+// the dialog ABORTS — we do NOT approve, so the user stays on this screen
+// with the report intact (once approved they're navigated away and the
+// report is no longer retrievable). We save before approving for that
+// same reason.
 
 import { useState } from "react";
 import ReactMarkdown from "react-markdown";
@@ -100,13 +101,24 @@ export function FinalReport({
     setBusy(true);
     setErr(null);
     try {
-      // Save first; if the user cancels the dialog, the run still
-      // completes — they intentionally chose not to keep the file.
-      await saveReportToFile(report);
+      // Save first. If the user cancels the save dialog, ABORT: do not
+      // approve, so they stay on this screen with the report intact — once
+      // approved they're navigated away and the report is no longer
+      // retrievable. The approval gate only fires after a successful save.
+      const saved = await saveReportToFile(report);
+      if (!saved) return; // cancelled — finally resets busy; nothing approved
       const next = await approveReport(state.run_id);
       onCompleted(next);
     } catch (e) {
-      setErr(e instanceof Error ? e.message : String(e));
+      const msg = e instanceof Error ? e.message : String(e);
+      // A 404 here means the run is gone (expired, or the dev server
+      // restarted its in-memory store) — say so plainly instead of leaking
+      // the raw status line.
+      setErr(
+        msg.includes("404")
+          ? "This run no longer exists — it may have expired or the server restarted. Start a new survey."
+          : msg,
+      );
     } finally {
       setBusy(false);
     }
@@ -123,8 +135,9 @@ export function FinalReport({
       <Stepper status={state.status} />
       <h1>Final report</h1>
       <p className="muted">
-        Review the report below. <strong>Approve &amp; save</strong> opens a save dialog and then
-        closes the run; cancelling the dialog finishes the run without saving.
+        Review the report below. <strong>Approve &amp; save</strong> opens a save dialog, then
+        completes the run. Cancelling the dialog keeps you here with the report intact — nothing is
+        saved or approved.
       </p>
 
       <div className="tabs">
