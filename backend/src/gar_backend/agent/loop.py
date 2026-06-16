@@ -327,7 +327,14 @@ async def phase_search(state: RunState, ctx: AgentContext) -> RunState:
             ],
         )
     ]
-    candidates: list[dict[str, Any]] = []
+    # Track which query surfaced each candidate (provenance), deduping by
+    # source:external_id via `seen`. Cross-query support — how many distinct
+    # query angles returned a doc — is exposed at the sources gate so the
+    # client can tell foundational, cross-cutting work (high support) from
+    # frontier work that only one angle surfaces (v1.3 retrieval-structure
+    # slice 1).
+    seen: dict[str, dict[str, Any]] = {}
+    provenance: dict[str, set[str]] = {}
 
     for _ in range(ctx.max_search_iterations):
         response = await _audited_complete(
@@ -363,7 +370,12 @@ async def phase_search(state: RunState, ctx: AgentContext) -> RunState:
                     tenant_id=ctx.access.tenant_id,
                 )
                 if isinstance(output, list):
-                    candidates.extend(output)
+                    query = str(tu.input.get("query", "")).strip()
+                    for doc in output:
+                        key = _candidate_key(doc)
+                        seen.setdefault(key, doc)
+                        if query:
+                            provenance.setdefault(key, set()).add(query)
                 tool_result_blocks.append(
                     {
                         "type": "tool_result",
@@ -382,11 +394,20 @@ async def phase_search(state: RunState, ctx: AgentContext) -> RunState:
                 )
         messages.append(Message(role="user", content=tool_result_blocks))
 
-    # Order the pool by concept-relevance so the sources gate (and any
-    # downstream cap) sees the most relevant work first — arXiv does not
-    # return results in relevance order (spec §5).
-    deduped = _dedupe_candidates(candidates)
-    ranked = ctx.reranker.rank(concept, deduped)
+    # Attach cross-query support, then order by concept relevance (BM25).
+    # Support is metadata for the client to draw the core/frontier line at
+    # presentation time, NOT the sort key — so the most relevant work stays on
+    # top and a downstream cap drops the low-relevance tail, not low-support
+    # frontier work (v1.3 slice 1, decision: BM25-default sort).
+    candidates = [
+        {
+            **doc,
+            "support": len(provenance.get(key, ())),
+            "matched_queries": sorted(provenance.get(key, set())),
+        }
+        for key, doc in seen.items()
+    ]
+    ranked = ctx.reranker.rank(concept, candidates)
     return request_source_selection(state, candidates=ranked)
 
 
@@ -635,18 +656,9 @@ def _assistant_message(response: LLMResponse) -> Message:
     return Message(role="assistant", content=content)
 
 
-def _dedupe_candidates(
-    candidates: list[dict[str, Any]],
-) -> list[dict[str, Any]]:
-    seen: set[tuple[str, str]] = set()
-    out: list[dict[str, Any]] = []
-    for c in candidates:
-        key = (c.get("source_name", ""), c.get("external_id", ""))
-        if key in seen:
-            continue
-        seen.add(key)
-        out.append(c)
-    return out
+def _candidate_key(candidate: dict[str, Any]) -> str:
+    """Identity of a candidate for dedup and provenance: source:external_id."""
+    return f"{candidate.get('source_name', '')}:{candidate.get('external_id', '')}"
 
 
 async def _audited_complete(

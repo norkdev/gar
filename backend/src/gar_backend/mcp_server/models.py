@@ -50,6 +50,16 @@ class Candidate(BaseModel):
     authors: list[str] = Field(default_factory=list)
     published: str | None = None
     url: str | None = None
+    support: int = Field(
+        default=0,
+        description="How many distinct search-query angles surfaced this source. "
+        "High support = cross-cutting / foundational; support 1 = a frontier "
+        "specific to one angle. Use it to group core vs. extension directions.",
+    )
+    matched_queries: list[str] = Field(
+        default_factory=list,
+        description="The query angles that surfaced this source (its provenance).",
+    )
 
 
 class RunStatusResult(BaseModel):

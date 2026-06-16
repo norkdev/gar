@@ -104,6 +104,8 @@ def _to_candidate(c: dict[str, Any], *, include_abstracts: bool) -> Candidate:
         authors=list(c.get("authors") or []),
         published=c.get("published"),
         url=c.get("url") or None,
+        support=int(c.get("support", 0)),
+        matched_queries=list(c.get("matched_queries") or []),
     )
 
 
