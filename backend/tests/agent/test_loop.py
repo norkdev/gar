@@ -388,6 +388,85 @@ async def test_search_reranks_candidates_by_concept_relevance(
     assert ids[0] == "on"  # the concept-matching paper is lifted to the top
 
 
+class _QueryFakeSource:
+    """A public source that returns different results per query."""
+
+    name = "test_source"
+    tool_name = "search_test_source"
+    tool_description = "Query-dependent fake source."
+
+    def __init__(self, by_query: dict[str, list[SearchResult]]) -> None:
+        self._by_query = by_query
+
+    async def search(self, query: str, *, max_results: int = 10) -> list[SearchResult]:
+        return list(self._by_query.get(query, []))
+
+
+async def test_search_records_cross_query_support(tmp_path: Path) -> None:
+    """A doc surfaced by two distinct queries gets support=2 with both queries
+    recorded (v1.3 slice 1)."""
+    doc = SearchResult("test_source", "D1", "Widget", "abs", (), None, "http://x")
+    fake = _FakePublicSource(results=[doc])  # same doc for any query
+    registry = ToolRegistry()
+    register_default_tools(registry, public_source=fake)  # type: ignore[arg-type]
+    llm = StubLLM(
+        [
+            _tool_use("t1", fake.tool_name, {"query": "beta angle"}),
+            _tool_use("t2", fake.tool_name, {"query": "alpha angle"}),
+            _text("done"),
+        ]
+    )
+    ctx = _build_ctx(tmp_path, llm, registry=registry)
+
+    new = await phase_search(_state_at_searching(tmp_path), ctx)
+    cands = new.pending_payload["candidates"]
+    assert len(cands) == 1  # deduped across the two queries
+    assert cands[0]["support"] == 2
+    assert cands[0]["matched_queries"] == ["alpha angle", "beta angle"]  # sorted
+
+
+async def test_search_support_does_not_override_relevance_sort(
+    tmp_path: Path,
+) -> None:
+    """Decision (case B): support is metadata, not the sort key. A high-support
+    but off-concept doc must NOT outrank a low-support but on-concept doc."""
+    core = SearchResult(
+        "test_source", "CORE", "Sourdough baking", "bread", (), None, ""
+    )
+    frontier = SearchResult(
+        "test_source",
+        "FRONT",
+        "Widget concept system",
+        "a widget concept",
+        (),
+        None,
+        "",
+    )
+    fake = _QueryFakeSource(
+        {"qa": [core], "qb": [core], "qc": [frontier]}  # core support 2, frontier 1
+    )
+    registry = ToolRegistry()
+    register_default_tools(registry, public_source=fake)  # type: ignore[arg-type]
+    llm = StubLLM(
+        [
+            _tool_use("t1", fake.tool_name, {"query": "qa"}),
+            _tool_use("t2", fake.tool_name, {"query": "qb"}),
+            _tool_use("t3", fake.tool_name, {"query": "qc"}),
+            _text("done"),
+        ]
+    )
+    ctx = _build_ctx(tmp_path, llm, registry=registry)
+
+    new = await phase_search(
+        _state_at_searching(tmp_path), ctx
+    )  # concept "widget concept"
+    cands = new.pending_payload["candidates"]
+    by_id = {c["external_id"]: c["support"] for c in cands}
+    assert by_id == {"CORE": 2, "FRONT": 1}
+    # frontier (on-concept, support 1) ranks above core (off-concept, support 2)
+    assert cands[0]["external_id"] == "FRONT"
+
+
 # ---------- phase_compose_report ----------
 
 

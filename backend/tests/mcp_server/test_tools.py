@@ -85,6 +85,31 @@ async def test_get_run_status_returns_structured_candidates() -> None:
     await client.aclose()
 
 
+async def test_get_run_status_surfaces_support_and_provenance() -> None:
+    data = {
+        "run_id": "r1",
+        "status": "awaiting_source_selection",
+        "pending_payload": {
+            "candidates": [
+                {
+                    "source_name": "arxiv",
+                    "external_id": "1",
+                    "title": "T",
+                    "snippet": "a",
+                    "support": 3,
+                    "matched_queries": ["q1", "q2", "q3"],
+                }
+            ]
+        },
+    }
+    client = make_client(constant_handler(data))
+    tools = tools_by_name(client)
+    out = await tools["get_run_status"].fn(run_id="r1")
+    assert out.candidates[0].support == 3
+    assert out.candidates[0].matched_queries == ["q1", "q2", "q3"]
+    await client.aclose()
+
+
 async def test_get_run_status_includes_abstracts_by_default() -> None:
     client = make_client(constant_handler(_sources_data(1)))
     tools = tools_by_name(client)

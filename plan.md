@@ -335,3 +335,61 @@ F1(等重み)は目的に合わないため使わない。
 集合ではない(クエリ語彙の変動で出入りあり)→ rerank + recall@K 計器で制御/計測する
 動機。(ロ)recall-max 検索は重く、同期 gate POST が接続タイムアウト → run は durable
 で完走しポーリング復帰(D-104 の実証、Phase 2 非同期化の動機)。
+
+---
+
+## 6. retrieval-structure トラック(v1.3、検索フェーズ再設計)
+
+「絞り込み」を flat な relevance 上位 K から、**query 集合の構造（コア＋フロンティア）**へ
+転換する。ユーザーが扱える範囲に収めつつ、基礎アイデアと拡張方向の地図を提示し、
+新規性・進歩性の判断を支援する。
+
+### 確定した設計判断
+
+- **コア = 連続 support のみ**。doc ごとに `support`（出現した query 角度の数）を保持し、
+  コア/フロンティアの線引きは**提示時にクライアントが動的に**行う（データ上は bin しない）。
+  strict intersection は採らない（多様な変種ではコアが空/極小になる）。
+- **変種生成 = agent、較正 = 決定的**。agent が facet 軸 × terminology 軸で N≈6–10 変種を出し、
+  system が件数で較正。terminology 軸は BM25 lexical 限界を query 段階で緩和する。
+- **≤100 = 完全集合**。各 query を `totalResults≤100` まで較正し**完全集合**を得る。
+  recall は「狭い完全集合 × 多数 × union」で確保。既定 100・可変。
+- **境界**：agent（変種生成）→ 決定的（サイジング・provenance・support・2段階アブスト・
+  bucket 内 rerank）→ agent（コア＋フロンティアを解釈してレポート位置づけを書く）。
+- **既定ソート = BM25（案B）**。support は順位でなく**メタデータ**。上限は低関連の裾を
+  落とし、recall@K の挙動を保つ。support を活かした構造対応の上限選抜は後続スライス。
+
+### スライス（検証先行）
+
+- **Slice 1（実装済み・統合）**: provenance → support → ゲート2で可視化。`phase_search`
+  を flat extend+dedup から **doc→出現query集合**保持に変更し、各候補に `support` /
+  `matched_queries` を付与。既定ソートは BM25 のまま（support は露出のみ）。MCP の
+  `Candidate` / `get_run_status` に support/matched_queries を露出。
+
+### Slice 1 live 検証(2026-06-16)— 「共通=基礎」仮説は棄却
+
+同一ノートで実測。275 候補・23 角度。結果:**高 support は「基礎コア」でなく「汎用
+マルチエージェント論文」を拾った**（s=11 "Survey of Multi-Agent Deep RL"、s≥7 はほぼ
+汎用 MARL）。一方**着想にドンピシャの論文は support=1**（"One Chatbot Per Person"、
+"Gossip-Enhanced Substrate for Agentic AI" 等）。原因:23 角度が語幹「multi-agent /
+agent / decentralized」を共有するため、lexical 検索では**汎用論文がほぼ全角度に語彙
+一致 → 高 support**。support が測るのは「語彙の汎用性」で「基礎性」ではない（BM25 で
+見た lexical 偏りの再現）。
+
+結論:
+- **案B（BM25ソート・support はメタデータ）は正解**。案A だったら汎用論文が上位を占め
+  着想ドンピシャ論文が埋もれていた。live が裏付け。
+- **「共通=基礎」は lexical では不成立**。価値はむしろ**フロンティア（support=1, 角度別
+  ＝拡張方向）**側。support は「核同定」でなく「**汎用検出**(高 support を下げる)」と
+  「フロンティア抽出」のメタデータとして有用。
+- **BM25 rerank も lexical support も同じ汎用バイアス** → 次は **semantic(embedding)
+  信号**が本命（lexical の二重の限界が実測で揃った）。
+
+### 改訂後のスライス（embedding 方針へ転換）
+
+- **Slice 2（本命・semantic）**: `Reranker` Protocol の **embedding 実装**を追加し、
+  関連度/コア同定を**意味的近さ**で測る。core = コンセプト埋め込みとの類似が高くかつ
+  **角度クラスタが意味的に一貫**する文献。依存追加（sentence-transformers 等）か外部
+  embedding API かは実装時に判断（軽量リポの方針と要トレードオフ）。
+- **Slice 3**: 完全集合 ≤100 の**件数サイジング**（totalResults プローブ）＋ **2段階
+  アブスト**＋レポートの**位置づけ節**（フロンティア=拡張方向を主役に、ユーザー着想
+  との対比）。構造対応の上限選抜（関連度枠＋多様性枠の MMR 的選抜）もここで。
