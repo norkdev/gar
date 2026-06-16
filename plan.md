@@ -360,12 +360,36 @@ F1(等重み)は目的に合わないため使わない。
 
 ### スライス（検証先行）
 
-- **Slice 1（実装済み）**: provenance → support → ゲート2で可視化。`phase_search` を
-  flat extend+dedup から **doc→出現query集合**保持に変更し、各候補に `support` /
+- **Slice 1（実装済み・統合）**: provenance → support → ゲート2で可視化。`phase_search`
+  を flat extend+dedup から **doc→出現query集合**保持に変更し、各候補に `support` /
   `matched_queries` を付与。既定ソートは BM25 のまま（support は露出のみ）。MCP の
-  `Candidate` / `get_run_status` に support/matched_queries を露出。件数サイジング不要で
-  「support が core を捉えるか」を live 検証できる最小スライス。
-- **Slice 2**: 完全集合 ≤100 の**件数サイジング**（arXiv totalResults プローブ + 構造化
-  変種生成）。
-- **Slice 3**: **2段階アブスト** + レポートの**位置づけ節**（基礎コア＋拡張方向＋
-  ユーザー着想との対比）。構造対応の上限選抜（コア枠＋関連度枠の MMR 的選抜）もここで。
+  `Candidate` / `get_run_status` に support/matched_queries を露出。
+
+### Slice 1 live 検証(2026-06-16)— 「共通=基礎」仮説は棄却
+
+同一ノートで実測。275 候補・23 角度。結果:**高 support は「基礎コア」でなく「汎用
+マルチエージェント論文」を拾った**（s=11 "Survey of Multi-Agent Deep RL"、s≥7 はほぼ
+汎用 MARL）。一方**着想にドンピシャの論文は support=1**（"One Chatbot Per Person"、
+"Gossip-Enhanced Substrate for Agentic AI" 等）。原因:23 角度が語幹「multi-agent /
+agent / decentralized」を共有するため、lexical 検索では**汎用論文がほぼ全角度に語彙
+一致 → 高 support**。support が測るのは「語彙の汎用性」で「基礎性」ではない（BM25 で
+見た lexical 偏りの再現）。
+
+結論:
+- **案B（BM25ソート・support はメタデータ）は正解**。案A だったら汎用論文が上位を占め
+  着想ドンピシャ論文が埋もれていた。live が裏付け。
+- **「共通=基礎」は lexical では不成立**。価値はむしろ**フロンティア（support=1, 角度別
+  ＝拡張方向）**側。support は「核同定」でなく「**汎用検出**(高 support を下げる)」と
+  「フロンティア抽出」のメタデータとして有用。
+- **BM25 rerank も lexical support も同じ汎用バイアス** → 次は **semantic(embedding)
+  信号**が本命（lexical の二重の限界が実測で揃った）。
+
+### 改訂後のスライス（embedding 方針へ転換）
+
+- **Slice 2（本命・semantic）**: `Reranker` Protocol の **embedding 実装**を追加し、
+  関連度/コア同定を**意味的近さ**で測る。core = コンセプト埋め込みとの類似が高くかつ
+  **角度クラスタが意味的に一貫**する文献。依存追加（sentence-transformers 等）か外部
+  embedding API かは実装時に判断（軽量リポの方針と要トレードオフ）。
+- **Slice 3**: 完全集合 ≤100 の**件数サイジング**（totalResults プローブ）＋ **2段階
+  アブスト**＋レポートの**位置づけ節**（フロンティア=拡張方向を主役に、ユーザー着想
+  との対比）。構造対応の上限選抜（関連度枠＋多様性枠の MMR 的選抜）もここで。
