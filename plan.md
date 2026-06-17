@@ -1,488 +1,560 @@
-# plan.md — MCP サーバー実装と AWS 移行の計画
+# plan.md — Plan for the MCP server implementation and the AWS migration
 
-> このドキュメントは v1.0.0 以降の拡張計画。Claude Code での実装セッションは
-> このファイルを正とする。README / spec.md と矛盾が生じた場合はこのファイルを
-> 更新してから実装すること。
-
----
-
-## 0. ゴールと優先順位
-
-1. **Phase 1(完了): ローカル MCP サーバー** — Claude Code / Claude Desktop
-   から GAR を操作できるようにする。stdio トランスポート。**`v1.1.0` 済み。**
-2. **検索 recall トラック(完了): `v1.2.0`** — breadth 検索 + 原文フレーズ注入
-   + BM25 rerank + recall@K 計器、および MCP ゲートの timeout ポーリング復帰
-   (§5 / PR #2,#3)。当初 v1.2.0 は AWS に割り当てていたが、AWS は v2.x に後ろ倒し、
-   この中間の機能追加を v1.2.0 とした。
-3. **Phase 2: AWS 移行** — v1 に組み込み済みのスケールシームを実リソースに
-   差し替える。**`v2.0.0`(v2.x)タグ。**
-4. **Phase 3(スコープ外・記録のみ): リモート MCP** — AWS 上の
-   streamable HTTP MCP + OAuth。本計画では実装しない。
-
-Phase 1 と Phase 2 が直交するように設計する(後述の D-102)。
-Phase 1 完了 → README 更新 → Phase 2 着手、の順。並行作業はしない。
+> This document is the expansion plan for everything after v1.0.0. Implementation
+> sessions in Claude Code treat this file as canonical. If a conflict with
+> README / spec.md arises, update this file first, then implement.
 
 ---
 
-## 1. 設計判断(Decisions)
+## 0. Goals and priorities
 
-### D-101: MCP は内部ツールではなく HITL ゲートを公開する
+1. **Phase 1 (done): local MCP server** — make GAR operable from Claude Code /
+   Claude Desktop. stdio transport. **Shipped as `v1.1.0`.**
+2. **Search-recall track (done): `v1.2.0`** — breadth search + verbatim-phrase
+   injection + BM25 rerank + recall@K instrumentation, plus timeout-polling
+   recovery for the MCP gates (§5 / PR #2,#3). v1.2.0 was originally assigned to
+   AWS, but AWS was pushed back to v2.x, and this intermediate feature addition
+   was made v1.2.0.
+3. **Phase 2: AWS migration** — replace the scale seams already built into v1
+   with real resources. **`v2.0.0` (v2.x) tag.**
+4. **Phase 3 (out of scope, recorded only): remote MCP** — streamable HTTP MCP
+   on AWS + OAuth. Not implemented in this plan.
 
-**判断**: MCP ツール面は GAR の内部機構(`search_arxiv` 等の低レベルツール)
-ではなく、ラン管理と 3 つの HITL ゲートの形で切る。GAR は MCP クライアント
-から見て「ガバナンス付きサブエージェント」になる。
-
-**理由**: 低レベルツールを公開すると、MCP クライアント側の LLM がエージェント
-ループを代替でき、grounding 検証・HITL ゲート・監査ログをバイパスした
-サーベイが成立してしまう。「すべてのステップが監査され、人間がゲートする」
-という本プロジェクトの中心主張が MCP 境界で破れる。ゲートを公開境界に
-すれば、ガバナンス層はプロトコル境界を越えても不変。
-
-**例外(当初案)**: `search_arxiv` は公開情報のみを扱うため単体公開してよい
-(補助ツール扱い)。private 側(ideas 検索)は D-103 に従う。
-
-**改訂(2026-06-14, v1.1 実装時)**: `search_arxiv` は v1.1 では**実装しない**。
-理由は 2 点。(1) この補助ツールは低レベル検索の公開であり、D-101 本文の
-「MCP 面は統治されたゲートとして切る」という主張をわずかに薄める。7 つの
-ゲート/ラン管理ツールだけでサーベイは完結し、補助検索は無くても機能要件を
-満たす。(2) 単体検索エンドポイント(`GET /sources/arxiv/search`)を新設すると
-route パスに `arxiv` が現れ、「`arxiv` は `sources/arxiv.py`・そのテスト・
-`deps.py` の 1 行にのみ出現する」という generic-source 原則(CLAUDE.md / spec §4)
-と緊張する。将来 MCP に公開検索を足すなら、generic な
-`GET /sources/public/search` + generic 名のツールとして入れる(Future Work)。
-よって v1.1 の公開ツールは **7 個**（補助 0）。
-
-### D-102: MCP サーバーは既存 HTTP API の薄いクライアントとして実装する(案B)
-
-**判断**: MCP サーバーは `gar_backend` を直接 import せず、`httpx` で
-既存 REST API(`POST /runs`、`POST /runs/{id}/gates/*`、`GET /runs/{id}` 等)
-を呼ぶ。base URL は環境変数 `GAR_API_URL`(デフォルト
-`http://localhost:8000`)。認証ヘッダは `GAR_API_KEY`(未設定なら付与しない。
-v1.1 のローカルバックエンドは pass-through なので不要)。
-
-**理由**: シーム #2(「UI は AWS を直接呼ばない。データプレーンはバックエンド
-の居場所から 1 ホップ」)を MCP にも適用する。これにより AWS 移行(Phase 2)
-後も **base URL と認証ヘッダの差し替えだけ**で同じ MCP サーバーが動き、
-MCP 実装と AWS 移行が直交する。「Two clients」は「Three clients」になり、
-エージェントループとガバナンス層の共有という既存の構図が延長される。
-
-**却下した代替案**: インプロセス型(CLI と同様に import して駆動)。
-ローカルでは手軽だが AWS 移行後に使えず、クライアント実装が分岐する。
-
-### D-103: private ツールは MCP スキーマからデフォルトで構造的に不在とする
-
-**判断**: MCP サーバーは起動時にロール(env `GAR_MCP_ROLE`、デフォルト
-`public`)を取り、既存の `governance/rbac.py` のレジストリ分離と同じ原則を
-MCP 境界で再現する。`public` ロールでは ideas(private)に触れるツールは
-**拒否されるのではなくスキーマに現れない**。`owner` ロールを明示設定した
-場合のみ全ツールを公開する。
-
-**理由**: rbac.py の中心主張(「private ツールは呼び出し時に拒否されるの
-ではなく、スキーマから構造的に不在」)が MCP というもう一つのツール公開
-境界でも成立することを、実装とテストで示す。
-
-**補足**: `start_survey` は notes の内容そのものを引数で受けるため
-(D-105)、ideas 検索ツールの公開とは別問題。ノート内容を MCP クライアント
-が渡すのはユーザー自身の操作であり、RBAC の管轄外。
-
-### D-104: v1.1 のツール呼び出しは同期、スキーマは最初からポーリング前提で切る
-
-**判断**: v1.1 では既存 API と同じく同期呼び出しを受け入れる(エージェント
-フェーズがツール呼び出し内で完走する。ローカルでは実用上問題ない)。
-ただしツールスキーマは `run_id` を返し `get_run_status` でポーリングする
-形を最初から定義しておき、Phase 2 で API が 202 + ポーリングに変わっても
-**MCP ツールの形は変えない**。
-
-**理由**: AWS 移行時に Lambda の実行時間制約から非同期化が必要になる。
-スキーマを先に非同期対応の形にしておけば、移行時の変更はサーバー実装の
-内側に閉じる。
-
-### D-105: MCP 経由のノート入力は content-upload パスを使う
-
-**判断**: MCP の `start_survey` は `notes`(`{path, content}` の配列)を
-受け、API の `notes_content` パス(`InMemoryIdeasSource`)に乗せる。
-`vault_path` パスは MCP では公開しない。
-
-**理由**: MCP サーバーとバックエンドが同一マシンにある保証は Phase 2 以降
-なくなる。vault_path はバックエンドのファイルシステム前提であり、リモート
-バックエンドに対して意味を持たない。content-upload パスなら local / AWS の
-どちらのバックエンドでも同一の挙動になる(Web UI と同じ理由)。
-ローカル vault のファイル読み出しは MCP クライアント側(Claude Code は
-ファイルを読める)の責務とする。
-レポートの保存も同様に、`get_report` が本文を返し、書き戻しはクライアント
-側の責務(Web UI と同じ)。
-
-### D-106: MCP 操作も監査する
-
-**判断**: バックエンドの監査ログに、リクエスト元クライアントの識別子を
-記録する。実装は API リクエストヘッダ `X-GAR-Client`(値: `web` / `cli` /
-`mcp`)を受けて audit レコードに `client` フィールドを追加する。
-`schema_version` を `1.1` に上げる(後方互換: フィールド追加のみ)。
-
-**理由**: 「ラン中に何が起きたかは audit.jsonl を読めば分かる。影の経路は
-ない」という主張を維持するため、新しいクライアント面も監査対象に含める。
-
-### D-107: SDK とパッケージ構成
-
-**判断**: 公式 Python SDK(`mcp` パッケージ)の FastMCP を使う。
-配置は `backend/src/gar_backend/mcp_server/`(モジュール名は `mcp` パッケージ
-との衝突を避けるため `mcp_server`)。エントリポイントは
-`uv run --package gar-backend gar-mcp` (pyproject の scripts に追加)。
-
-**理由**: 公式 SDK が Claude Code / Claude Desktop との互換で最も安全。
-同一パッケージ内に置くことで Pydantic モデル(ツール入出力)を API スキーマ
-と共有でき、乖離を防げる。
-
-### D-108: `get_run_status` は候補を構造化リストで、アブスト込み・多めに返す
-
-**判断(2026-06-14, v1.1 スモーク後に追加)**: `get_run_status` の候補提示を
-プロセ文字列の要約(先頭20件)から、**構造化リスト** `candidates: [{id, title,
-abstract?, authors, published, url}]` + `candidate_count`(総数)に変更する。
-件数上限は引数 `max_candidates`(既定 100、env `GAR_MCP_MAX_CANDIDATES` で
-既定変更可)。アブストは引数 `include_abstracts`(**既定 on**)で、トークンを
-気にする呼び出し側がオプトアウトする。`activity_summary` は短い見出しに戻す。
-
-**理由**: ゲート2(採用選択)は本来の人間の意思決定点。スモークでは 89 件
-ヒットに対し 20 件しか見えず、しかも title のみだったため、クライアント側
-(Claude Code)の関連度グルーピングが「タイトル推測」止まりだった。アブストは
-arXiv 取得時に既に SearchResult.snippet として state にあり、エージェントの
-関連度評価にも使われている既存データなので、MCP 面に通すのは追加 API コール
-無しでトークンコストのみ。「クライアントが要約・整理する」(D-101 の分担)を
-活かすには、整理の材料=アブストを既定で渡すのが理にかなう。件数100は id+title
-で約3k、アブスト込みで約20–25k tokens。重くなりすぎたら将来
-`list_candidates(limit, offset, include_abstracts)` に分離する(今は過剰設計を
-避け get_run_status 拡張で足りる)。
-
-**限界(明記)**: 上限拡大は対症療法。ヒットが上限を超えれば依然こぼれ、arXiv の
-返却順は関連度順とは限らない。本質的な緩和は rerank(retrieve 技法、後フェーズ)。
+Design Phase 1 and Phase 2 to be orthogonal (D-102, below). Order:
+Phase 1 done → README update → start Phase 2. No parallel work.
 
 ---
 
-## 2. Phase 1 — MCP サーバー(stdio)
+## 1. Decisions
 
-### 2.1 公開ツール(7 個。補助 `search_arxiv` は D-101 改訂で v1.1 から除外)
+### D-101: MCP exposes the HITL gates, not the internal tools
 
-すべて入出力を Pydantic モデルで定義し、API スキーマと共有する。
+**Decision**: Cut the MCP tool surface as run management and the three HITL
+gates, not as GAR's internal mechanisms (low-level tools such as `search_arxiv`).
+From the MCP client's point of view, GAR is a "governed sub-agent."
 
-| ツール | 入力 | 出力 | 対応 API |
+**Rationale**: If we exposed the low-level tools, the LLM on the MCP client side
+could substitute for the agent loop, and a survey that bypasses grounding
+validation, the HITL gates, and the audit log would become possible. The central
+claim of this project — "every step is audited, and a human gates it" — would
+break at the MCP boundary. If the gates are the public boundary, the governance
+layer stays invariant even across the protocol boundary.
+
+**Exception (original proposal)**: `search_arxiv` deals only with public
+information, so exposing it standalone is acceptable (treated as an auxiliary
+tool). The private side (ideas search) follows D-103.
+
+**Revision (2026-06-14, during the v1.1 implementation)**: `search_arxiv` is
+**not implemented** in v1.1. Two reasons. (1) This auxiliary tool is the
+exposure of low-level search, and it slightly dilutes the claim in the body of
+D-101 that "the MCP surface is cut as governed gates." The seven gate / run-
+management tools complete a survey by themselves, and auxiliary search meets the
+functional requirements even without it. (2) Adding a standalone search endpoint
+(`GET /sources/arxiv/search`) makes `arxiv` appear in a route path, which is in
+tension with the generic-source principle (CLAUDE.md / spec §4) that "`arxiv`
+appears only in `sources/arxiv.py`, its tests, and one line of `deps.py`." If we
+later add public search to MCP, we put it in as a generic
+`GET /sources/public/search` + a generically named tool (Future Work).
+Therefore the public tools in v1.1 number **7** (0 auxiliary).
+
+### D-102: Implement the MCP server as a thin client of the existing HTTP API (plan B)
+
+**Decision**: The MCP server does not import `gar_backend` directly; it calls the
+existing REST API (`POST /runs`, `POST /runs/{id}/gates/*`, `GET /runs/{id}`,
+etc.) via `httpx`. The base URL is the environment variable `GAR_API_URL`
+(default `http://localhost:8000`). The auth header is `GAR_API_KEY` (not added if
+unset; unnecessary because the v1.1 local backend is pass-through).
+
+**Rationale**: Apply seam #2 ("the UI does not call AWS directly; the data plane
+is one hop from wherever the backend lives") to MCP too. As a result, even after
+the AWS migration (Phase 2), the same MCP server runs with **only the base URL
+and auth header swapped**, and the MCP implementation and the AWS migration stay
+orthogonal. "Two clients" becomes "Three clients," extending the existing
+arrangement of sharing the agent loop and the governance layer.
+
+**Rejected alternative**: in-process (import and drive it, as the CLI does). Easy
+locally, but unusable after the AWS migration, and it forks the client
+implementation.
+
+### D-103: Private tools are structurally absent from the MCP schema by default
+
+**Decision**: The MCP server takes a role at startup (env `GAR_MCP_ROLE`, default
+`public`) and reproduces, at the MCP boundary, the same registry-separation
+principle as the existing `governance/rbac.py`. In the `public` role, tools that
+touch ideas (private) **do not appear in the schema rather than being refused**.
+Only when the `owner` role is explicitly set are all tools exposed.
+
+**Rationale**: Show, in implementation and tests, that the central claim of
+rbac.py ("private tools are not refused at call time; they are structurally
+absent from the schema") holds at another tool-exposure boundary, namely MCP.
+
+**Note**: `start_survey` takes the content of the notes themselves as an argument
+(D-105), which is a separate matter from exposing the ideas-search tool. The MCP
+client passing note content is the user's own operation, outside the jurisdiction
+of RBAC.
+
+### D-104: v1.1 tool calls are synchronous; the schema is cut up front assuming polling
+
+**Decision**: In v1.1 we accept synchronous calls, the same as the existing API
+(the agent phase runs to completion inside the tool call; in practice this is no
+problem locally). However, the tool schema returns `run_id` and is defined from
+the start to be polled via `get_run_status`, so that even when the API changes to
+202 + polling in Phase 2, **the shape of the MCP tools does not change**.
+
+**Rationale**: At AWS migration time, going asynchronous becomes necessary
+because of Lambda's execution-time constraints. If the schema is already in an
+async-ready shape, the migration-time change is confined to the inside of the
+server implementation.
+
+### D-105: Note input via MCP uses the content-upload path
+
+**Decision**: The MCP `start_survey` takes `notes` (an array of
+`{path, content}`) and rides the API's `notes_content` path
+(`InMemoryIdeasSource`). The `vault_path` path is not exposed in MCP.
+
+**Rationale**: From Phase 2 on, there is no longer a guarantee that the MCP server
+and the backend are on the same machine. vault_path presumes the backend's
+filesystem and is meaningless against a remote backend. With the content-upload
+path, behavior is identical against either a local or AWS backend (same reason as
+the Web UI). Reading files from a local vault is the responsibility of the MCP
+client side (Claude Code can read files). Saving the report is likewise: `get_report`
+returns the body, and writing it back is the client's responsibility (same as the
+Web UI).
+
+### D-106: Audit MCP operations too
+
+**Decision**: Record an identifier of the originating client in the backend's
+audit log. Implementation: accept the API request header `X-GAR-Client` (value:
+`web` / `cli` / `mcp`) and add a `client` field to the audit record. Raise
+`schema_version` to `1.1` (backward compatible: field addition only).
+
+**Rationale**: To uphold the claim that "what happened during a run can be learned
+by reading audit.jsonl; there is no shadow path," include the new client surface
+in the audit scope.
+
+### D-107: SDK and package layout
+
+**Decision**: Use FastMCP from the official Python SDK (the `mcp` package).
+Placement is `backend/src/gar_backend/mcp_server/` (module name `mcp_server` to
+avoid a clash with the `mcp` package). The entry point is
+`uv run --package gar-backend gar-mcp` (added to pyproject's scripts).
+
+**Rationale**: The official SDK is safest for compatibility with Claude Code /
+Claude Desktop. Placing it inside the same package lets us share the Pydantic
+models (tool I/O) with the API schema and prevents drift.
+
+### D-108: `get_run_status` returns candidates as a structured list, with abstracts, and generously
+
+**Decision (2026-06-14, added after the v1.1 smoke)**: Change the candidate
+presentation of `get_run_status` from a prose-string summary (first 20 items) to
+a **structured list** `candidates: [{id, title, abstract?, authors, published,
+url}]` + `candidate_count` (total). The count cap is the argument `max_candidates`
+(default 100, default changeable via env `GAR_MCP_MAX_CANDIDATES`). Abstracts are
+controlled by the argument `include_abstracts` (**default on**), so callers that
+worry about tokens can opt out. `activity_summary` reverts to a short headline.
+
+**Rationale**: Gate 2 (adoption selection) is the proper human decision point. In
+the smoke, against 89 hits only 20 were visible, and those were title-only, so
+the client side's (Claude Code's) relevance grouping stalled at "guessing from
+titles." The abstract is already in state as SearchResult.snippet at arXiv-fetch
+time and is existing data used in the agent's relevance evaluation, so passing it
+through the MCP surface costs only tokens, with no additional API call. To make
+the most of "the client summarizes and organizes" (the D-101 division of labor),
+passing the material for organizing — the abstracts — by default is reasonable.
+A count of 100 is about 3k with id+title, and about 20–25k tokens with abstracts.
+If it gets too heavy, split it out into `list_candidates(limit, offset,
+include_abstracts)` in the future (for now, avoid over-engineering; extending
+get_run_status suffices).
+
+**Limit (stated explicitly)**: Raising the cap is symptomatic treatment. If hits
+exceed the cap, things still spill, and arXiv's return order is not necessarily
+relevance order. The essential mitigation is rerank (a retrieval technique, a
+later phase).
+
+---
+
+## 2. Phase 1 — MCP server (stdio)
+
+### 2.1 Public tools (7. The auxiliary `search_arxiv` is excluded from v1.1 by the D-101 revision)
+
+All I/O is defined with Pydantic models and shared with the API schema.
+
+| Tool | Input | Output | Corresponding API |
 |---|---|---|---|
 | `start_survey` | `notes: list[{path, content}]` | `run_id, status` | `POST /runs` (notes_content) |
-| `list_runs` | なし | `runs: list[{run_id, status, updated_at}]` | `GET /runs` |
+| `list_runs` | none | `runs: list[{run_id, status, updated_at}]` | `GET /runs` |
 | `get_run_status` | `run_id` | `status, current_gate?, activity_summary` | `GET /runs/{id}` |
 | `review_concept` | `run_id, action: approve\|edit, edited_concept?` | `status` | `POST /runs/{id}/gates/concept` |
 | `select_sources` | `run_id, adopted_ids: list[str]` | `status` | `POST /runs/{id}/gates/sources` |
 | `approve_report` | `run_id, action: approve\|reject, feedback?` | `status` | `POST /runs/{id}/gates/report` |
-| `get_report` | `run_id` | `markdown, citations_valid, warnings` | `GET /runs/{id}`(report 部分) |
+| `get_report` | `run_id` | `markdown, citations_valid, warnings` | `GET /runs/{id}` (report portion) |
 
-注意:
-- `list_runs` の時刻フィールドは、バックエンドの `serialize_state` が持つのが
-  `updated_at`(`created_at` は未保持)なので `updated_at` を返す。
-- `approve_report` の `action: reject` はバックエンドに棄却遷移が無いため、
-  v1.1 では呼ぶと「未対応」エラーを返す(スキーマ形は D-104 のため維持)。
-- `get_report` の `citations_valid` / `warnings` は、report ゲートの
-  `pending_payload` に grounding 検証サマリ(`report_validation`)を載せる
-  小改修(hitl.py + loop.py)で供給する。採用エビデンスが無いランでは
-  `citations_valid = null`(検証対象なし)。同じフィールドは web UI も将来
-  利用できる。
-- `get_run_status` の `current_gate` は、MCP クライアント(Claude)が
-  「次に人間に何を確認すべきか」を判断できる程度の情報を含めること
-  (例: gate=sources のとき候補一覧の要約)。
-- ツール description には「ゲートでは必ず人間の確認を取ってから呼ぶこと」
-  を明記する。ガバナンスの最後の 1 マイルは MCP クライアント側の挙動に
-  依存するため、description はその指示を運ぶ場所として扱う。
-- `search_arxiv` 用の素のエンドポイントが現状 API にない場合は
-  `GET /sources/arxiv/search` を新設する(レート制御は既存 arxiv.py を通す)。
+Notes:
+- For the time field of `list_runs`, what the backend's `serialize_state` holds
+  is `updated_at` (`created_at` is not retained), so return `updated_at`.
+- `approve_report`'s `action: reject` has no rejection transition in the backend,
+  so in v1.1 calling it returns a "not supported" error (the schema shape is
+  retained because of D-104).
+- `get_report`'s `citations_valid` / `warnings` are supplied by a small change
+  (hitl.py + loop.py) that puts the grounding-validation summary
+  (`report_validation`) onto the report gate's `pending_payload`. For runs with no
+  adopted evidence, `citations_valid = null` (nothing to validate). The same
+  fields are available to the web UI in the future.
+- `get_run_status`'s `current_gate` should contain enough information for the MCP
+  client (Claude) to decide "what to confirm with the human next" (e.g., when
+  gate=sources, a summary of the candidate list).
+- The tool description must state "at a gate, always obtain human confirmation
+  before calling." Because the last mile of governance depends on the MCP client's
+  behavior, treat the description as the place that carries that instruction.
+- If there is currently no bare endpoint in the API for `search_arxiv`, add
+  `GET /sources/arxiv/search` (rate control passes through the existing arxiv.py).
 
-### 2.2 実装タスク
+### 2.2 Implementation tasks
 
-1. `mcp_server/` パッケージ新設: FastMCP サーバー、ツール定義、
-   `GarApiClient`(httpx ラッパー、`GAR_API_URL` / `GAR_API_KEY` /
-   `X-GAR-Client: mcp` ヘッダ)。
-2. D-103 のロール実装: `GAR_MCP_ROLE=public|owner`。v1.1 では ideas 系
-   ツールが存在しないため実質 no-op だが、ツール登録をレジストリ経由に
-   して、ロールでスキーマが変わるテストを書く(将来 ideas 検索を MCP に
-   足すときの受け皿)。
-3. D-106 の audit 拡張: `client` フィールド、`schema_version: "1.1"`、
-   既存ログとの後方互換テスト。
-4. pyproject scripts に `gar-mcp` 追加。
-5. `.mcp.json`(リポジトリルート、Claude Code 用)と Claude Desktop の
-   設定例を `docs/mcp.md` または README に記載。
-6. スモークテスト: Claude Desktop から 1 ラン完走(start → concept →
-   sources → report → get_report)。そのときの audit.jsonl 断片を README に
-   貼る(既存の「実ログを見せる」流儀)。
+1. New `mcp_server/` package: FastMCP server, tool definitions, `GarApiClient`
+   (httpx wrapper, `GAR_API_URL` / `GAR_API_KEY` / `X-GAR-Client: mcp` header).
+2. Role implementation of D-103: `GAR_MCP_ROLE=public|owner`. In v1.1 the ideas
+   tools do not exist, so it is effectively a no-op, but route tool registration
+   through the registry and write a test that the schema changes with the role (a
+   receptacle for when ideas search is later added to MCP).
+3. Audit extension of D-106: the `client` field, `schema_version: "1.1"`, and a
+   backward-compatibility test against existing logs.
+4. Add `gar-mcp` to pyproject scripts.
+5. Document `.mcp.json` (repo root, for Claude Code) and a configuration example
+   for Claude Desktop in `docs/mcp.md` or the README.
+6. Smoke test: one full run from Claude Desktop (start → concept → sources →
+   report → get_report). Paste a fragment of the audit.jsonl from that run into
+   the README (the existing "show the real log" practice).
 
-### 2.3 テスト方針
+### 2.3 Testing approach
 
-- 既存の流儀を踏襲: オフライン、`httpx.MockTransport` でバックエンド API を
-  モック。実 API キー不要。
-- 必須ケース:
-  - 各ツール → 正しいエンドポイント・ペイロードへの変換
-  - `GAR_MCP_ROLE` によるツールスキーマの差(構造的不在の検証)
-  - バックエンド未起動 / 4xx / 5xx 時のエラーメッセージ(MCP クライアントの
-    LLM が読んで次の行動を決められる文面にする)
-  - audit `client` フィールドと schema_version 1.1
-- ゲート遷移の状態異常(例: concept 未承認で select_sources)はバックエンド
-  側の既存責務。MCP 側はエラーをそのまま透過することをテストする。
+- Follow the existing practice: offline, mock the backend API with
+  `httpx.MockTransport`. No real API key needed.
+- Required cases:
+  - each tool → conversion to the correct endpoint / payload
+  - the difference in tool schema by `GAR_MCP_ROLE` (verification of structural
+    absence)
+  - error messages when the backend is not running / on 4xx / 5xx (worded so the
+    MCP client's LLM can read it and decide the next action)
+  - the audit `client` field and schema_version 1.1
+- State anomalies in gate transitions (e.g., select_sources with concept not
+  approved) are the existing responsibility of the backend side. The MCP side
+  tests that it passes the error through verbatim.
 
-### 2.4 ドキュメント / リリース
+### 2.4 Documentation / release
 
-- README: 「Two clients」→「Three clients」に表を拡張(CLI / Web UI / MCP)。
-  MCP セクション新設(D-101 / D-102 の理由を 1 段落ずつ)。
-- spec.md に MCP 章を追記。
-- `v1.1.0` タグ。
-
----
-
-## 3. Phase 2 — AWS 移行
-
-方針: 既存の 7 つのスケールシームを上から順に現実化する。
-**API の外形(パスとスキーマ)は変えない**。変えるのは応答の同期性のみ
-(下記 3.2)。フロントエンドと MCP サーバーは base URL 差し替えで動く
-ことを移行の完了条件とする。
-
-### 3.1 タスク(優先順)
-
-1. **状態の外部化**: `DynamoDbRunStore`(RunStore Protocol の実装追加、
-   1 クラススワップ)。レポート保存を S3 に(`reports/` の保存先抽象を
-   確認し、必要なら `ReportStore` を切る)。
-2. **Lambda 化**: 既存の Mangum フックを使い API Gateway + Lambda で
-   現行 API を載せる。
-3. **非同期化**: エージェントフェーズを伴う POST(/runs、各 gate)を
-   202 Accepted + `get_run_status` ポーリングに変更。フェーズ実行は
-   まず「受付 Lambda が非同期で自己 invoke」の最小構成とし、
-   Step Functions wait-for-callback への発展は future work のまま据え置く。
-   ※ MCP ツールの形は D-104 により不変。Web UI はポーリング対応の修正が必要
-   (SSE は v2 では CloudWatch ベースに置き換えず、ポーリングに簡素化して
-   よい — 判断は実装時に)。
-4. **監査ログ**: ラン単位で S3 オブジェクト(JSONL)に書く。ローカルは
-   従来通りファイル。`AuditSink` 抽象を切って 2 実装。
-5. **BedrockLLM**: `LLMClient` Protocol の実装追加(シーム #5 の現実化)。
-   env でプロバイダ選択。クロスリージョン推論プロファイルの利用は実装時に
-   リージョン事情を確認して決める。
-6. **認証**: `api/auth.py` の pass-through を API キー検証(API Gateway の
-   API key または独自ヘッダ)に差し替え。**Cognito は v2 ではやらない**。
-7. **CDK**: スカフォールド済みスタックに実リソース定義
-   (DynamoDB / S3 / Lambda / API Gateway / IAM)。`cdk synth` が CI で
-   通ることを維持。
-8. **ノートの扱いの明文化**: AWS バックエンドは content-upload パスのみ
-   サポート。vault_path はローカルバックエンド専用と README に明記
-   (未公開ノートの所在はこのプロジェクトのプライバシー設計の核心なので、
-   設計判断として 1 段落書く)。
-
-### 3.2 やらないこと(v2 スコープ外)
-
-- Cognito / OAuth、マルチテナントの実体化(シームは維持)
-- リモート MCP(streamable HTTP)
-- LLM トークンストリーミング
-- PDF ingestion、追加 public source
-
-### 3.3 リリース
-
-- README: Architecture 図を v2 構成(local / AWS の 2 通り)に更新。
-  「AWS infra: scaffolded」の記述を実態に合わせて更新。
-- `v2.0.0` タグ。
+- README: expand the table from "Two clients" → "Three clients" (CLI / Web UI /
+  MCP). New MCP section (the rationale of D-101 / D-102, one paragraph each).
+- Add an MCP chapter to spec.md.
+- `v1.1.0` tag.
 
 ---
 
-## 4. 進め方のメモ(Claude Code セッション向け)
+## 3. Phase 2 — AWS migration
 
-- 作業はローカルコピー上の feature ブランチで行う
-  (`feature/mcp-server`、`feature/aws-backend`)。main 直 push はしない。
-- 1 PR = 1 関心事。Phase 1 は (a) audit 拡張、(b) mcp_server 本体、
-  (c) docs、の 3 PR 程度に分割する。
-- 新規コードも既存の構造規約(governance は 1 関心 1 ファイル、
-  Protocol によるスワップ点、frozen dataclass の純関数)に従う。
-- テストは `backend/tests/` のミラー構造に追加。全テストはオフラインを維持。
-- このファイルの Decisions に反する実装が必要になったら、先にこのファイルを
-  更新し、理由を 1 段落書いてから実装する。
+Approach: realize the existing seven scale seams from the top down.
+**Do not change the API's outward shape (paths and schema).** What changes is only
+the synchronicity of the response (3.2 below). The completion condition for the
+migration is that the frontend and the MCP server run with a base-URL swap.
 
----
+### 3.1 Tasks (in priority order)
 
-## 5. 検索 recall 改善トラック(Phase 2 とは独立)
+1. **Externalize state**: `DynamoDbRunStore` (add a RunStore Protocol
+   implementation, a 1-class swap). Move report storage to S3 (confirm the
+   storage-destination abstraction of `reports/`, and cut a `ReportStore` if
+   needed).
+2. **Lambda-ize**: using the existing Mangum hook, put the current API on API
+   Gateway + Lambda.
+3. **Go asynchronous**: change POSTs that involve an agent phase (/runs, each
+   gate) to 202 Accepted + `get_run_status` polling. For phase execution, first
+   take the minimal form of "the accepting Lambda self-invokes asynchronously,"
+   and leave the evolution to Step Functions wait-for-callback shelved as future
+   work. ※ The shape of the MCP tools is unchanged by D-104. The Web UI needs a
+   fix to support polling (SSE need not be replaced with a CloudWatch base in v2;
+   it may be simplified to polling — decide at implementation time).
+4. **Audit log**: write to an S3 object (JSONL) per run. Local stays a file as
+   before. Cut an `AuditSink` abstraction with 2 implementations.
+5. **BedrockLLM**: add an `LLMClient` Protocol implementation (realization of seam
+   #5). Provider selection via env. Decide whether to use a cross-region inference
+   profile at implementation time, after checking the regional situation.
+6. **Auth**: replace the pass-through in `api/auth.py` with API-key verification
+   (an API Gateway API key or a custom header). **Cognito is not done in v2.**
+7. **CDK**: define real resources on the scaffolded stacks (DynamoDB / S3 / Lambda
+   / API Gateway / IAM). Keep `cdk synth` passing in CI.
+8. **Spell out the handling of notes**: the AWS backend supports only the content-
+   upload path. State in the README that vault_path is local-backend only (because
+   the whereabouts of unpublished notes is the core of this project's privacy
+   design, write one paragraph on it as a design decision).
 
-MCP スモークで判明:arXiv 検索の取りこぼし(関連の核心文献が候補順の後方に
-埋もれる/そもそも検索語に乗らない)が、GAR の本来目的(新規性・進歩性の予備
-調査)に直接効く。**目的に照らすと precision より recall が支配的**——先行研究
-の見逃し(FN)は「偽の新規」を生む致命的誤りで、余分な候補(FP)は人間/
-クライアントが弾けばよい(D-108 でアブスト提示済み)。指標は **recall@K**(人間
-が読む上位 K 件で決定的先行研究を拾えるか)+ **citation precision = 1.0**(grounding)。
-F1(等重み)は目的に合わないため使わない。
+### 3.2 What is not done (out of v2 scope)
 
-レバー(影響大→小):
+- Cognito / OAuth, materializing multi-tenancy (keep the seams)
+- Remote MCP (streamable HTTP)
+- LLM token streaming
+- PDF ingestion, additional public sources
 
-- **B. breadth 検索(実装済み, feature/recall)**: `SEARCH_SYSTEM` を recall 優先に
-  書き換え(ファセット分解・同義語/別表記・並列クエリ・過剰 prune 禁止、「5-20件で
-  停止」を撤廃)。`max_search_iterations` 4→6、検索ツール `max_results` 既定 10→15。
-- **A. 原文フレーズ注入(実装済み, feature/recall)**: 検索フェーズに元ノート原文
-  (上限 8000 字)を注入し、要約で落ちた技術語句を literature クエリに使わせる
-  (spec §5 の未実現を実装)。privacy:生の私案を web search に流さない指示は維持
-  (arXiv 等の文献ソースには distill した技術語のみ)。
-- **D. rerank(実装済み, feature/recall)**: `retrieval/rerank.py` に `Reranker`
-  Protocol(spec §5 のスワップ点)+ 依存なしの `BM25Reranker`。`phase_search` で
-  dedup 後・ソースゲート前にコンセプトで並べ替え → MCP の上限は rerank 後に切れる
-  (低関連の裾だけ落ちる)。安定ソートで無シグナル時は no-op。embedding/LLM rerank は
-  同 Protocol で後から差し替え可能。
-- **計器(実装済み, feature/recall)**: `retrieval/recall.py` に `recall_at_k` /
-  `rank_of` / `known_item_recall`(純関数)。オフラインテストで「決定的先行研究を
-  プールの末尾に仕込み → rerank で上位 K に引き上がる(recall@5: 0.0→1.0)」を実証。
-  実 arXiv に対する live 評価ハーネス(seed 概念＋ハンドラベル)は今後の作業。
+### 3.3 Release
 
-### 実地検証(v1.1 スモーク, 2026-06-15)
-
-同一ノートで B+A 適用前後を比較:候補 **94→294**(3.1×)、arXiv 検索 **12→23**、
-原文注入で private_ideas 検索も発火。前回採用の核心6件中5件を再発見＋着想により近い
-新規文献(One Chatbot Per Person 等)が多数浮上。知見:(イ)breadth 化は厳密な上位
-集合ではない(クエリ語彙の変動で出入りあり)→ rerank + recall@K 計器で制御/計測する
-動機。(ロ)recall-max 検索は重く、同期 gate POST が接続タイムアウト → run は durable
-で完走しポーリング復帰(D-104 の実証、Phase 2 非同期化の動機)。
+- README: update the Architecture diagram to the v2 configuration (the 2 ways:
+  local / AWS). Update the "AWS infra: scaffolded" wording to match reality.
+- `v2.0.0` tag.
 
 ---
 
-## 6. retrieval-structure トラック(v1.3、検索フェーズ再設計)
+## 4. Notes on how to proceed (for Claude Code sessions)
 
-「絞り込み」を flat な relevance 上位 K から、**query 集合の構造（コア＋フロンティア）**へ
-転換する。ユーザーが扱える範囲に収めつつ、基礎アイデアと拡張方向の地図を提示し、
-新規性・進歩性の判断を支援する。
-
-### 確定した設計判断
-
-- **コア = 連続 support のみ**。doc ごとに `support`（出現した query 角度の数）を保持し、
-  コア/フロンティアの線引きは**提示時にクライアントが動的に**行う（データ上は bin しない）。
-  strict intersection は採らない（多様な変種ではコアが空/極小になる）。
-- **変種生成 = agent、較正 = 決定的**。agent が facet 軸 × terminology 軸で N≈6–10 変種を出し、
-  system が件数で較正。terminology 軸は BM25 lexical 限界を query 段階で緩和する。
-- **≤100 = 完全集合**。各 query を `totalResults≤100` まで較正し**完全集合**を得る。
-  recall は「狭い完全集合 × 多数 × union」で確保。既定 100・可変。
-- **境界**：agent（変種生成）→ 決定的（サイジング・provenance・support・2段階アブスト・
-  bucket 内 rerank）→ agent（コア＋フロンティアを解釈してレポート位置づけを書く）。
-- **既定ソート = BM25（案B）**。support は順位でなく**メタデータ**。上限は低関連の裾を
-  落とし、recall@K の挙動を保つ。support を活かした構造対応の上限選抜は後続スライス。
-
-### スライス（検証先行）
-
-- **Slice 1（実装済み・統合）**: provenance → support → ゲート2で可視化。`phase_search`
-  を flat extend+dedup から **doc→出現query集合**保持に変更し、各候補に `support` /
-  `matched_queries` を付与。既定ソートは BM25 のまま（support は露出のみ）。MCP の
-  `Candidate` / `get_run_status` に support/matched_queries を露出。
-
-### Slice 1 live 検証(2026-06-16)— 「共通=基礎」仮説は棄却
-
-同一ノートで実測。275 候補・23 角度。結果:**高 support は「基礎コア」でなく「汎用
-マルチエージェント論文」を拾った**（s=11 "Survey of Multi-Agent Deep RL"、s≥7 はほぼ
-汎用 MARL）。一方**着想にドンピシャの論文は support=1**（"One Chatbot Per Person"、
-"Gossip-Enhanced Substrate for Agentic AI" 等）。原因:23 角度が語幹「multi-agent /
-agent / decentralized」を共有するため、lexical 検索では**汎用論文がほぼ全角度に語彙
-一致 → 高 support**。support が測るのは「語彙の汎用性」で「基礎性」ではない（BM25 で
-見た lexical 偏りの再現）。
-
-結論:
-- **案B（BM25ソート・support はメタデータ）は正解**。案A だったら汎用論文が上位を占め
-  着想ドンピシャ論文が埋もれていた。live が裏付け。
-- **「共通=基礎」は lexical では不成立**。価値はむしろ**フロンティア（support=1, 角度別
-  ＝拡張方向）**側。support は「核同定」でなく「**汎用検出**(高 support を下げる)」と
-  「フロンティア抽出」のメタデータとして有用。
-- **BM25 rerank も lexical support も同じ汎用バイアス** → 次は **semantic(embedding)
-  信号**が本命（lexical の二重の限界が実測で揃った）。
-
-### 改訂後のスライス（embedding 方針へ転換）
-
-- **Slice 2（本命・semantic、実装済み）**: `Reranker` Protocol の **embedding 実装**を
-  追加し、関連度を**意味的近さ**(cosine)で測る。lexical(BM25/support)の語彙汎用バイアス
-  を解く。**方式は外部 embedding API**(Anthropic はネイティブ embeddings 無し → Voyage
-  推奨)に決定:依存最軽(httpx のみ・新規依存ゼロ)、Lambda クリーン、プライバシーは
-  コンセプトが既に LLM に出ている前提で限界的、かつ**全体オプトイン**。
-  - `retrieval/embedding.py`: `EmbeddingClient`(OpenAI 互換 `data[].embedding`、query/
-    document の input_type、バッチ、エラー時 `EmbeddingError`)+ `EmbeddingReranker`
-    (cosine 順、**API 失敗時は BM25 へフォールバック**=ランを落とさない)。
-  - `make_reranker()`(env 選択): 既定 `bm25`。`GAR_RERANKER=embedding` +
-    `GAR_EMBED_API_KEY`/`VOYAGE_API_KEY`(任意 `GAR_EMBED_MODEL`/`GAR_EMBED_URL`)で有効化。
-    キー未設定なら BM25 に降格(配線はキー有無に依らず有効)。`AgentContext.reranker` の
-    既定をこの factory に。BM25 は依存ゼロの既定のまま。
-  - **フォールバックはログ警告**(黙る劣化を防ぐ)。embedding 失敗→BM25 を logging.warning。
-  - **live 検証済み(2026-06-16, Voyage voyage-3.5)**: slice-1 の 275 候補プールを再ランク。
-    embedding TOP は「パーソナライズド LLM エージェント/プロファイル」で一貫し、**BM25 が
-    語彙一致で上げていた off-target(ゲーム理論・UCB バンディット・主張検証)を除去** ──
-    lexical 汎用バイアスの矯正を実測。ニュアンス:single-vector ゆえ意味的重心(個人プロ
-    ファイル・エージェント)を優先し、重心外の facet(純 gossip インフラ)は下がる →
-    **embedding(関連度)と support(facet 被覆)は相補**。無料枠は 3RPM/10K TPM 制限で
-    バッチが 429→fallback するため、全件は有料枠が必要(判明済み)。
-- **Slice 3（位置づけ地図、実装済み）**: レポートの**位置づけ節**を「方向地図」化。
-  当初の件数サイジング(totalResults プローブ)は**見送り** ── Slice 1 で「lexical
-  set-algebra(support)= 汎用」と判明し完全集合の payoff が小、core 同定は embedding
-  に移ったため。方向は **A+B** で作る(ユーザー選択):
-  - **B(定量・決定的)**: `retrieval/directions.py` の pure-Python k-means(正規化＋
-    決定的 maximin 初期化＋小クラスタ除外)で**埋め込みを意味クラスタ化**。`EmbeddingClient`
-    にメモ化キャッシュを足し、rerank が埋めたベクトルを**再利用(API 二重課金なし)**。
-    K=clamp(round(n/40),3,7)、env `GAR_DIRECTIONS_K`。`EmbeddingReranker.analyze_directions`。
-  - **A(自然言語)**: `phase_search` が方向(代表タイトル＋concept-nearest)を context に
-    持たせ、`phase_compose_report`/`COMPOSE_REPORT_SYSTEM` の §4 で **LLM が各方向を命名し
-    「コア/拡張方向/着想の位置」を hedged に記述**。BM25 モードは directions 無し(graceful)。
-  - **live 検証(2026-06-16, 275 プール)**: 「個人プロファイル・エージェント(concept-nearest)/
-    連合・分散学習/分散社会経済/マルチエージェント通信」の4方向 ── 着想のファセットそのもの。
-    知見:maximin 初期化が**外れ値(物理学論文)を単独クラスタに**選ぶ → `min_cluster_size`
-    で除外して解決。
-  - **テスト環境のハーメティック化**: `.env` の `GAR_RERANKER=embedding` が main.py の
-    load_dotenv 経由で pytest に漏れる問題を、conftest の autouse fixture で遮断
-    (テストは既定 BM25、live API を叩かない)。
-  - **gate2 への方向露出(実装済み, 2026-06-17)**: ブラウザ smoke で「285 件のフラット
-    リストは認知負荷が高い」と判明。`phase_search` が各候補に `direction`(所属クラスタ
-    id)を、各 direction に安定 `id` を付与し、gate2 ペイロードに載せる。web UI は
-    concept-nearest を先頭に**方向ごとにグループ表示**(代表タイトルをラベル、off-topic は
-    既定折りたたみ、グループ内は relevance 順で top-N + 「show more」、nearest に「Adopt
-    top N」)。MCP クライアントが即興でまとめていた grouping を**サーバ側の決定的 directions
-    に統一**できる(ただし MCP スキーマ露出は未実装 ── 下記)。
-  - **クラスタリング堅牢化(実装済み, 2026-06-17)**: live で **302/9/7/4/3/3** の退化
-    (1 メガクラスタ＋物理学ノイズの小クラスタ)を観測。原因は maximin 初期化が**最遠点=
-    off-topic 外れ値をシード**にすること。修正:**relevance 上位 N 件のみクラスタ化**
-    (`DEFAULT_CLUSTER_POOL=200`、env `GAR_DIRECTIONS_POOL`)。候補は rerank 順なので
-    off-topic な裾を除外でき、シードが on-topic に限定される。live 再検証で
-    **90/48/29/21/12**(全て on-topic、裾 168 件は「Other」へ)に改善。
-  - **未実装(将来)**: 件数サイジング、構造対応の上限選抜(MMR)、**MCP `get_run_status`
-    への directions 露出**(現状 web ペイロードのみ。MCP `Candidate` に `direction`、応答に
-    `directions` 要約を足せば MCP クライアントも同じ grouping を消費できる)、relevance
-    閾値ベースの可変プール(固定 N の代替)。
+- Work happens on a feature branch on the local copy (`feature/mcp-server`,
+  `feature/aws-backend`). No direct push to main.
+- 1 PR = 1 concern. Split Phase 1 into roughly 3 PRs: (a) the audit extension, (b)
+  the mcp_server itself, (c) docs.
+- New code also follows the existing structural conventions (governance is one
+  concern per file, swap points via Protocol, pure functions over frozen
+  dataclasses).
+- Add tests in the mirror structure of `backend/tests/`. Keep all tests offline.
+- If an implementation that contradicts the Decisions in this file becomes
+  necessary, update this file first and write one paragraph of rationale before
+  implementing.
 
 ---
 
-## 7. コストトラック — フェーズ別モデル階層(2026-06-16)
+## 5. Search-recall improvement track (independent of Phase 2)
 
-**背景**: 反復的な live 検証で Claude API コストが嵩んできた。Haiku をメインに、
-**「ここぞという時だけ」Sonnet** にする方針(ユーザー指示)。
+Discovered in the MCP smoke: arXiv search misses (relevant core literature gets
+buried toward the back of the candidate order / does not ride the search terms at
+all), which directly affects GAR's true purpose (preliminary investigation of
+novelty / inventive step). **In light of the purpose, recall dominates over
+precision** — missing prior work (FN) is the fatal error that produces "false
+novelty," while extra candidates (FP) can be filtered by the human / client
+(abstracts already presented per D-108). The metric is **recall@K** (whether the
+top K items a human reads catch the decisive prior work) + **citation precision =
+1.0** (grounding). F1 (equal weight) does not fit the purpose, so it is not used.
 
-**判断**: 単一の `AgentContext.model` を `ModelPolicy`(derive / search / compose の
-3 フィールド)に置き換え、フェーズごとにモデルを割り当てる。
+Levers (large impact → small):
 
-- **derive=Haiku 4.5**: ノート要約。短く低リスク → 安いモデルで十分。
-- **search=Haiku 4.5**: トークン最重(アブストがコンテキストに累積)= 削減効果最大。
-  recall は breadth プロンプト・embedding rerank・人間の gate2 選別で部分的に担保。
-- **compose=Sonnet 4.6**: 人間が読むレポート(引用規律・hedged な統合・位置づけ地図)。
-  弱いモデルは引用を壊し grounding リトライを誘発 → ここに金を使う。
+- **B. breadth search (implemented, feature/recall)**: rewrite `SEARCH_SYSTEM` to
+  favor recall (facet decomposition, synonyms / alternate spellings, parallel
+  queries, no over-pruning; drop "stop at 5–20 items"). `max_search_iterations`
+  4→6, search tool `max_results` default 10→15.
+- **A. verbatim-phrase injection (implemented, feature/recall)**: inject the
+  original note verbatim (cap 8000 chars) into the search phase, so technical
+  phrases dropped in summarization are used in the literature query (implements the
+  unrealized part of spec §5). Privacy: the instruction not to flow the raw private
+  draft into web search is kept (only distilled technical terms go to literature
+  sources such as arXiv).
+- **D. rerank (implemented, feature/recall)**: a `Reranker` Protocol (the swap point
+  of spec §5) + a dependency-free `BM25Reranker` in `retrieval/rerank.py`. In
+  `phase_search`, after dedup and before the source gate, reorder by the concept →
+  the MCP cap is cut after rerank (only the low-relevance tail is dropped). Stable
+  sort, a no-op when there is no signal. embedding / LLM rerank can be swapped in
+  later under the same Protocol.
+- **Instrumentation (implemented, feature/recall)**: `recall_at_k` / `rank_of` /
+  `known_item_recall` (pure functions) in `retrieval/recall.py`. Offline tests
+  demonstrate "plant decisive prior work at the tail of the pool → rerank lifts it
+  into the top K (recall@5: 0.0→1.0)." A live evaluation harness against real arXiv
+  (seed concept + hand labels) is future work.
 
-**実装**: `make_model_policy()` が env から解決。`GAR_MODEL_DERIVE` /
-`GAR_MODEL_SEARCH` / `GAR_MODEL_COMPOSE` で各フェーズを上書き可。`GAR_THOROUGH=1` は
-recall 重視の search を **compose 階層(Sonnet)へ昇格**(明示の `GAR_MODEL_SEARCH` が
-優先)。`_audited_complete` は `model` を明示引数で受け、監査レコードに使用モデルを
-記録(どのフェーズがどの階層で動いたか trace に残る)。LLM 抽象(Anthropic↔Bedrock
-swap、spec §10 seam)は維持。
+### Field validation (v1.1 smoke, 2026-06-15)
 
-**未実装(将来)**: 動的エスカレーション(grounding リトライ時のみ compose を昇格)、
-コスト計測の監査集計。
+Compared before/after applying B+A on the same note: candidates **94→294**
+(3.1×), arXiv searches **12→23**, and verbatim injection also fired the
+private_ideas search. Re-found 5 of the 6 core items adopted last time, plus many
+new pieces of literature closer to the idea (One Chatbot Per Person, etc.) surfaced.
+Findings: (a) breadth-ification is not a strict superset (in/out churn from query-
+vocabulary variation) → motivation to control/measure with rerank + the recall@K
+instrument. (b) recall-max search is heavy, and a synchronous gate POST hit a
+connection timeout → the run is durable, completes, and recovers by polling
+(demonstration of D-104, and motivation for Phase 2 going asynchronous).
 
 ---
 
-## 8. derived concept の可読性(2026-06-16)
+## 6. retrieval-structure track (v1.3, search-phase redesign)
 
-**背景**: gate1 で人間が読む derived concept が密な散文 1 ブロックで、ファセットが
-読み取りにくかった。可読性を上げたいが、concept は **retrieval の入力**でもある
-(`phase_search` のプロンプト＋`reranker.rank(concept, …)` のクエリ)ため精度低下を懸念。
+Convert "narrowing down" from a flat top-K by relevance to **a structure of the
+query set (core + frontier)**. While staying within what the user can handle,
+present a map of the foundational idea and the directions of extension, and support
+the judgment of novelty / inventive step.
 
-**判断**: `DERIVE_CONCEPT_SYSTEM` を「短いリード文(1-2 文)＋ファセット箇条書き」を
-出すよう変更。**懸念は形式ではなく内容欠落**と整理: embedding rerank は concept 全体を
-1 ベクトル化、BM25 は bag-of-words ── どちらも**語彙**依存でレイアウト非依存。箇条書き化で
-固有の技術語(sub-profile, confidence threshold 等)が落ちると rerank クエリの弁別力が
-下がるため、プロンプトに**固有語を verbatim 保持**する指示を明記。加えて原文フレーズ
-注入(§5)が retrieval を別経路で裏打ちしており、concept 散文への依存はそもそも部分的。
+### Settled design decisions
 
-**live 検証(2026-06-16, 同じ agent.md)**: リード文＋8 ファセット箇条書きで出力、固有語
-保持を確認。recall は 281 件(散文版 313 件)── エージェント検索のクエリ揺らぎの範囲内で
-有意な低下なし、TOP は PersonaX(中核の user-modeling)で関連度も維持。
+- **Core = contiguous support only**. Hold per-doc `support` (the number of query
+  angles in which it appeared), and draw the core/frontier line **dynamically on
+  the client at presentation time** (do not bin it in the data). Do not take a
+  strict intersection (with diverse variants the core becomes empty/minimal).
+- **Variant generation = agent, calibration = deterministic**. The agent emits
+  N≈6–10 variants over the facet axis × terminology axis, and the system calibrates
+  by count. The terminology axis loosens the BM25 lexical limit at the query stage.
+- **≤100 = complete set**. Calibrate each query down to `totalResults≤100` to
+  obtain a **complete set**. Recall is secured by "narrow complete sets × many ×
+  union." Default 100, variable.
+- **Boundaries**: agent (variant generation) → deterministic (sizing / provenance /
+  support / two-stage abstracts / in-bucket rerank) → agent (interpret core +
+  frontier and write the report positioning).
+- **Default sort = BM25 (plan B)**. support is **metadata**, not rank. The cap
+  drops the low-relevance tail and preserves the recall@K behavior. A structure-
+  aware cap selection that leverages support is a follow-up slice.
+
+### Slices (validation first)
+
+- **Slice 1 (implemented, integrated)**: provenance → support → visualized at
+  gate 2. Change `phase_search` from flat extend+dedup to **holding doc→the set of
+  appearing queries**, and attach `support` / `matched_queries` to each candidate.
+  The default sort stays BM25 (support is exposure only). Expose
+  support/matched_queries in MCP's `Candidate` / `get_run_status`.
+
+### Slice 1 live validation (2026-06-16) — the "common = foundational" hypothesis is rejected
+
+Measured on the same note. 275 candidates, 23 angles. Result: **high support
+picked up not the "foundational core" but "generic multi-agent papers"** (s=11
+"Survey of Multi-Agent Deep RL", s≥7 is almost entirely generic MARL). Meanwhile
+**the paper that is dead-on for the idea has support=1** ("One Chatbot Per Person",
+"Gossip-Enhanced Substrate for Agentic AI", etc.). Cause: because the 23 angles
+share the stems "multi-agent / agent / decentralized," in lexical search **generic
+papers match the vocabulary across almost all angles → high support**. What support
+measures is "vocabulary genericness," not "foundationalness" (a reprise of the
+lexical bias seen with BM25).
+
+Conclusions:
+- **Plan B (BM25 sort, support as metadata) is correct**. Had it been plan A,
+  generic papers would have occupied the top and the dead-on idea paper would have
+  been buried. Live backs this up.
+- **"common = foundational" does not hold under lexical**. The value is rather on
+  the **frontier side (support=1, per-angle = direction of extension)**. support is
+  useful not for "core identification" but as metadata for "**generic detection**
+  (push high support down)" and "frontier extraction."
+- **Both BM25 rerank and lexical support have the same generic bias** → next, a
+  **semantic (embedding) signal** is the real bet (the double limit of lexical lined
+  up in measurement).
+
+### Revised slices (turn toward an embedding approach)
+
+- **Slice 2 (the real bet, semantic, implemented)**: add an **embedding
+  implementation** of the `Reranker` Protocol and measure relevance by **semantic
+  closeness** (cosine). It resolves the lexical (BM25/support) vocabulary-generic
+  bias. **The method is decided as an external embedding API** (Anthropic has no
+  native embeddings → Voyage recommended): lightest dependency (httpx only, zero new
+  deps), Lambda-clean, privacy is marginal on the premise that the concept is
+  already in the LLM, and it is **globally opt-in**.
+  - `retrieval/embedding.py`: `EmbeddingClient` (OpenAI-compatible
+    `data[].embedding`, query/document input_type, batch, `EmbeddingError` on
+    error) + `EmbeddingReranker` (cosine order, **fall back to BM25 on API failure**
+    = do not drop the run).
+  - `make_reranker()` (env selection): default `bm25`. Enabled with
+    `GAR_RERANKER=embedding` + `GAR_EMBED_API_KEY`/`VOYAGE_API_KEY` (optionally
+    `GAR_EMBED_MODEL`/`GAR_EMBED_URL`). If no key is set, it degrades to BM25 (the
+    wiring is valid regardless of key presence). Make this factory the default for
+    `AgentContext.reranker`. BM25 stays the zero-dependency default.
+  - **The fallback logs a warning** (to prevent silent degradation). embedding
+    failure → BM25 is a logging.warning.
+  - **Live-validated (2026-06-16, Voyage voyage-3.5)**: re-ranked slice-1's 275-
+    candidate pool. The embedding TOP is consistently "personalized LLM agents /
+    profiles," and it **removed the off-target items that BM25 had raised by
+    vocabulary match (game theory, UCB bandits, claim verification)** — measured
+    correction of the lexical generic bias. Nuance: being single-vector, it
+    prioritizes the semantic centroid (personal profiles / agents), and facets off
+    the centroid (pure gossip infrastructure) drop → **embedding (relevance) and
+    support (facet coverage) are complementary**. The free tier has a 3RPM/10K TPM
+    limit, so a batch hits 429→fallback; running everything needs a paid tier
+    (confirmed).
+- **Slice 3 (positioning map, implemented)**: turn the report's **positioning
+  section** into a "direction map." The original count sizing (totalResults probe)
+  is **skipped** — Slice 1 found that "lexical set-algebra (support) = generic," so
+  the payoff of a complete set is small, and core identification moved to embedding.
+  The directions are built with **A+B** (user's choice):
+  - **B (quantitative, deterministic)**: pure-Python k-means in
+    `retrieval/directions.py` (normalization + deterministic maximin initialization
+    + small-cluster exclusion) **semantically clusters the embeddings**. Add a
+    memoization cache to `EmbeddingClient` and **reuse the vectors that rerank
+    embedded (no double API billing)**. K=clamp(round(n/40),3,7), env
+    `GAR_DIRECTIONS_K`. `EmbeddingReranker.analyze_directions`.
+  - **A (natural language)**: `phase_search` puts the directions (representative
+    title + concept-nearest) into the context, and in §4 of
+    `phase_compose_report`/`COMPOSE_REPORT_SYSTEM` **the LLM names each direction and
+    describes "core / direction of extension / position of the idea" in a hedged
+    manner**. BM25 mode has no directions (graceful).
+  - **Live validation (2026-06-16, 275 pool)**: the 4 directions "personal profiles
+    / agents (concept-nearest) / federated / distributed learning / distributed
+    socioeconomics / multi-agent communication" — the facets of the idea itself.
+    Finding: maximin initialization picks **an outlier (a physics paper) as a
+    standalone cluster** → solved by excluding it with `min_cluster_size`.
+  - **Hermeticizing the test environment**: the problem of `.env`'s
+    `GAR_RERANKER=embedding` leaking into pytest via main.py's load_dotenv is blocked
+    with an autouse fixture in conftest (tests default to BM25 and do not hit the live
+    API).
+  - **Exposing directions at gate2 (implemented, 2026-06-17)**: the browser smoke
+    found that "a flat list of 285 items has high cognitive load." `phase_search`
+    attaches `direction` (the cluster id it belongs to) to each candidate and a stable
+    `id` to each direction, and puts them on the gate2 payload. The web UI shows
+    concept-nearest first, **grouped by direction** (representative title as the label,
+    off-topic collapsed by default, within a group top-N in relevance order + "show
+    more," "Adopt top N" on nearest). The grouping that the MCP client was improvising
+    can be **unified onto server-side deterministic directions** (but MCP schema
+    exposure is not implemented — see below).
+  - **Hardening the clustering (implemented, 2026-06-17)**: observed the degeneration
+    **302/9/7/4/3/3** in live (1 mega-cluster + small clusters of physics noise). The
+    cause is that maximin initialization **seeds the farthest point = an off-topic
+    outlier**. Fix: **cluster only the top N by relevance**
+    (`DEFAULT_CLUSTER_POOL=200`, env `GAR_DIRECTIONS_POOL`). Since candidates are in
+    rerank order, the off-topic tail can be excluded and the seeds are limited to on-
+    topic. Live re-validation improved it to **90/48/29/21/12** (all on-topic; the
+    168-item tail goes to "Other").
+  - **Not implemented (future)**: count sizing, structure-aware cap selection (MMR),
+    **exposing directions to MCP `get_run_status`** (currently web payload only; if we
+    add `direction` to MCP's `Candidate` and a `directions` summary to the response,
+    the MCP client could consume the same grouping), a relevance-threshold-based
+    variable pool (an alternative to a fixed N).
+
+---
+
+## 7. Cost track — per-phase model tier (2026-06-16)
+
+**Background**: iterative live validation has run up Claude API costs. The policy
+is to make Haiku the main and use **Sonnet only when it counts** (user
+instruction).
+
+**Decision**: replace the single `AgentContext.model` with `ModelPolicy` (3 fields:
+derive / search / compose) and assign a model per phase.
+
+- **derive=Haiku 4.5**: note summarization. Short and low-risk → a cheap model
+  suffices.
+- **search=Haiku 4.5**: heaviest in tokens (abstracts accumulate in context) =
+  largest savings. Recall is partly secured by the breadth prompt, embedding rerank,
+  and the human's gate2 selection.
+- **compose=Sonnet 4.6**: the report a human reads (citation discipline, hedged
+  synthesis, positioning map). A weaker model breaks citations and induces grounding
+  retries → spend the money here.
+
+**Implementation**: `make_model_policy()` resolves from env. `GAR_MODEL_DERIVE` /
+`GAR_MODEL_SEARCH` / `GAR_MODEL_COMPOSE` can override each phase. `GAR_THOROUGH=1`
+promotes the recall-focused search **to the compose tier (Sonnet)** (an explicit
+`GAR_MODEL_SEARCH` takes priority). `_audited_complete` receives `model` as an
+explicit argument and records the model used in the audit record (which phase ran at
+which tier remains in the trace). The LLM abstraction (Anthropic↔Bedrock swap, spec
+§10 seam) is kept.
+
+**Not implemented (future)**: dynamic escalation (promote compose only on a
+grounding retry), audit aggregation of cost measurement.
+
+---
+
+## 8. Readability of the derived concept (2026-06-16)
+
+**Background**: the derived concept a human reads at gate1 was one dense prose
+block, and the facets were hard to read. We want to improve readability, but the
+concept is also **the input to retrieval** (the prompt for `phase_search` + the
+query for `reranker.rank(concept, …)`), so a precision drop was a concern.
+
+**Decision**: change `DERIVE_CONCEPT_SYSTEM` to emit "a short lead sentence (1–2
+sentences) + facet bullets." Reframed the **concern as missing content, not
+format**: embedding rerank turns the whole concept into 1 vector, BM25 is bag-of-
+words — both depend on **vocabulary** and are layout-independent. Because bulleting
+could drop proper technical terms (sub-profile, confidence threshold, etc.) and
+lower the discriminating power of the rerank query, the prompt explicitly instructs
+to **preserve proper terms verbatim**. In addition, verbatim-phrase injection (§5)
+backs retrieval through a separate path, so the dependence on the concept prose is
+partial to begin with.
+
+**Live validation (2026-06-16, same agent.md)**: output a lead sentence + 8 facet
+bullets, and confirmed proper-term preservation. Recall is 281 items (the prose
+version was 313 items) — within the range of the agent search's query jitter, no
+significant drop, and the TOP is PersonaX (the core user-modeling), with relevance
+also maintained.
