@@ -110,6 +110,95 @@ async def test_get_run_status_surfaces_support_and_provenance() -> None:
     await client.aclose()
 
 
+def _sources_data_with_directions() -> dict:
+    return {
+        "run_id": "r1",
+        "status": "awaiting_source_selection",
+        "context": {
+            "directions": [
+                {
+                    "id": 0,
+                    "representatives": ["Near A", "Near B"],
+                    "size": 2,
+                    "contains_concept": True,
+                },
+                {
+                    "id": 1,
+                    "representatives": ["Far X"],
+                    "size": 1,
+                    "contains_concept": False,
+                },
+            ]
+        },
+        "pending_payload": {
+            "candidates": [
+                {
+                    "source_name": "arxiv",
+                    "external_id": "0",
+                    "title": "Near A",
+                    "snippet": "a",
+                    "direction": 0,
+                },
+                {
+                    "source_name": "arxiv",
+                    "external_id": "1",
+                    "title": "Near B",
+                    "snippet": "b",
+                    "direction": 0,
+                },
+                {
+                    "source_name": "arxiv",
+                    "external_id": "2",
+                    "title": "Far X",
+                    "snippet": "c",
+                    "direction": 1,
+                },
+            ]
+        },
+    }
+
+
+async def test_get_run_status_exposes_directions() -> None:
+    """The sources gate surfaces the server-side directions so the MCP client
+    can present candidates grouped, instead of improvising its own clusters."""
+    client = make_client(constant_handler(_sources_data_with_directions()))
+    tools = tools_by_name(client)
+    out = await tools["get_run_status"].fn(run_id="r1")
+    assert [d.id for d in out.directions] == [0, 1]
+    assert out.directions[0].contains_concept is True
+    assert out.directions[0].representatives == ["Near A", "Near B"]
+    assert out.directions[0].size == 2
+    # Each candidate carries its cluster id, matching a Direction.id.
+    assert [c.direction for c in out.candidates] == [0, 0, 1]
+    await client.aclose()
+
+
+async def test_get_run_status_no_directions_off_sources_gate() -> None:
+    """Directions are only surfaced at the sources gate (where the candidate
+    list they index is also returned), even if they linger in context."""
+    data = {
+        "run_id": "r1",
+        "status": "awaiting_report_approval",
+        "context": {"directions": [{"id": 0, "representatives": ["X"], "size": 1}]},
+        "pending_payload": {"report": "# R"},
+    }
+    client = make_client(constant_handler(data))
+    tools = tools_by_name(client)
+    out = await tools["get_run_status"].fn(run_id="r1")
+    assert out.directions == []
+    await client.aclose()
+
+
+async def test_get_run_status_bm25_mode_has_no_directions() -> None:
+    """No context directions (BM25 mode) → empty directions, candidates carry None."""
+    client = make_client(constant_handler(_sources_data(2)))
+    tools = tools_by_name(client)
+    out = await tools["get_run_status"].fn(run_id="r1")
+    assert out.directions == []
+    assert all(c.direction is None for c in out.candidates)
+    await client.aclose()
+
+
 async def test_get_run_status_includes_abstracts_by_default() -> None:
     client = make_client(constant_handler(_sources_data(1)))
     tools = tools_by_name(client)

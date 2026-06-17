@@ -20,7 +20,7 @@ governance layer still owns *how* each step runs.
 |---|---|---|---|
 | `start_survey` | `notes: [{path, content}]` | `run_id, status` | `POST /runs` |
 | `list_runs` | — | `[{run_id, status, updated_at}]` | `GET /runs` |
-| `get_run_status` | `run_id, max_candidates=100, include_abstracts=true` | `status, current_gate?, activity_summary, candidates[], candidate_count` | `GET /runs/{id}` |
+| `get_run_status` | `run_id, max_candidates=100, include_abstracts=true` | `status, current_gate?, activity_summary, candidates[], candidate_count, directions[]` | `GET /runs/{id}` |
 | `review_concept` | `run_id, action: approve\|edit, edited_concept?` | `status` | gate 1 |
 | `select_sources` | `run_id, adopted_ids: [str]` | `status` | gate 2 |
 | `approve_report` | `run_id, action: approve\|reject, feedback?` | `status` | gate 3 |
@@ -42,6 +42,14 @@ Notes:
   Organizing and ranking the list is the client's job — the server returns
   it raw. (Beyond the cap, results can still be missed; better ranking is
   future work, not a bigger cap.)
+- **Directions at the sources gate.** When semantic reranking ran
+  (`GAR_RERANKER=embedding`), `get_run_status` also returns a `directions`
+  list — semantic clusters of the pool (id, representative titles, size,
+  `contains_concept`) — and each candidate carries its `direction` id. This
+  is the same server-side grouping the Web UI uses, so the MCP client can
+  present candidates grouped by direction (concept-nearest first) instead
+  of improvising its own clusters. In BM25 mode the list is empty and
+  candidates have `direction: null`.
 - **Long phases return `processing`.** The search and compose phases run
   synchronously inside `review_concept` / `select_sources` (v1.1, D-104). A
   recall-broad search can outrun the request timeout — when it does, the

@@ -60,6 +60,30 @@ class Candidate(BaseModel):
         default_factory=list,
         description="The query angles that surfaced this source (its provenance).",
     )
+    direction: int | None = Field(
+        default=None,
+        description="Id of the semantic direction (cluster) this candidate fell "
+        "in — matches a Direction.id in the run's `directions`. Null in BM25 mode "
+        "or if it was dropped as cluster noise.",
+    )
+
+
+class Direction(BaseModel):
+    """One semantic cluster of the candidate pool (embedding directions). Use
+    these to present candidates grouped by topic instead of as a flat list — the
+    same server-side structure the Web UI groups the sources gate by."""
+
+    id: int = Field(description="Cluster id; candidates carry it as `direction`.")
+    representatives: list[str] = Field(
+        default_factory=list,
+        description="Representative paper titles nearest the cluster centroid — "
+        "name the direction from these.",
+    )
+    size: int = Field(default=0, description="Candidates that fell in this cluster.")
+    contains_concept: bool = Field(
+        default=False,
+        description="True for the cluster nearest the user's idea (present first).",
+    )
 
 
 class RunStatusResult(BaseModel):
@@ -83,6 +107,12 @@ class RunStatusResult(BaseModel):
         default=0,
         description="Total candidates found. If it exceeds len(candidates), the "
         "list was truncated to max_candidates.",
+    )
+    directions: list[Direction] = Field(
+        default_factory=list,
+        description="Semantic clusters of the candidate pool — empty in BM25 mode "
+        "or outside the sources gate. Present candidates grouped by direction, "
+        "concept-nearest first, rather than as one flat list.",
     )
 
 
