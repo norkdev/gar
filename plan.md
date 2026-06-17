@@ -497,11 +497,13 @@ Conclusions:
     rerank order, the off-topic tail can be excluded and the seeds are limited to on-
     topic. Live re-validation improved it to **90/48/29/21/12** (all on-topic; the
     168-item tail goes to "Other").
+  - **Exposing directions to MCP `get_run_status` (implemented, 2026-06-18)**: added
+    `direction` to MCP's `Candidate` and a `directions` summary (id / representatives /
+    size / contains_concept) to `RunStatusResult`, surfaced at the sources gate. The
+    MCP client now consumes the same server-side grouping the web UI uses instead of
+    improvising its own clusters.
   - **Not implemented (future)**: count sizing, structure-aware cap selection (MMR),
-    **exposing directions to MCP `get_run_status`** (currently web payload only; if we
-    add `direction` to MCP's `Candidate` and a `directions` summary to the response,
-    the MCP client could consume the same grouping), a relevance-threshold-based
-    variable pool (an alternative to a fixed N).
+    a relevance-threshold-based variable pool (an alternative to a fixed N).
 
 ---
 

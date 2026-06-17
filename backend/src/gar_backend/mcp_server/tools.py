@@ -25,6 +25,7 @@ from typing import Any, Literal
 from gar_backend.mcp_server.client import GarApiClient, GarApiError, GarApiTimeout
 from gar_backend.mcp_server.models import (
     Candidate,
+    Direction,
     GateResult,
     NoteInput,
     ReportResult,
@@ -106,7 +107,21 @@ def _to_candidate(c: dict[str, Any], *, include_abstracts: bool) -> Candidate:
         url=c.get("url") or None,
         support=int(c.get("support", 0)),
         matched_queries=list(c.get("matched_queries") or []),
+        direction=c.get("direction"),
     )
+
+
+def _to_directions(data: dict[str, Any]) -> list[Direction]:
+    """Map the run's context directions (set during search) to Direction models."""
+    return [
+        Direction(
+            id=int(d.get("id", i)),
+            representatives=list(d.get("representatives") or []),
+            size=int(d.get("size", 0)),
+            contains_concept=bool(d.get("contains_concept", False)),
+        )
+        for i, d in enumerate(data.get("context", {}).get("directions") or [])
+    ]
 
 
 def _summarize_activity(data: dict[str, Any], *, total: int, shown: int) -> str:
@@ -120,10 +135,17 @@ def _summarize_activity(data: dict[str, Any], *, total: int, shown: int) -> str:
         )
     if status == "awaiting_source_selection":
         trunc = "" if shown >= total else f"; showing {shown} (raise max_candidates)"
+        dirs = data.get("context", {}).get("directions") or []
+        grouped = (
+            f" The pool clusters into {len(dirs)} semantic direction(s) "
+            "(`directions`); present candidates grouped, concept-nearest first."
+            if dirs
+            else ""
+        )
         return (
             f"Search complete; {total} candidate(s) found{trunc}. Awaiting human "
             "selection at the sources gate. The candidates are in the `candidates` "
-            "field; adopt by id via select_sources."
+            f"field; adopt by id via select_sources.{grouped}"
         )
     if status == "awaiting_report_approval":
         return (
@@ -179,14 +201,16 @@ def make_tools(client: GarApiClient) -> list[McpTool]:
         current_gate names the open gate (concept | sources | report). At the
         sources gate the `candidates` field holds the candidate sources (with
         abstracts by default) for you to organize and present; candidate_count
-        is the total found. Lower max_candidates or set include_abstracts=False
-        to reduce tokens."""
+        is the total found. When semantic clustering ran, `directions` groups the
+        pool into topic clusters (concept-nearest flagged) and each candidate's
+        `direction` is its cluster id — present candidates grouped by direction,
+        concept-nearest first, rather than as one flat list. Lower max_candidates
+        or set include_abstracts=False to reduce tokens."""
         data = await client.get_run(run_id)
         status = data["status"]
+        at_sources = status == "awaiting_source_selection"
         raw = (
-            data.get("pending_payload", {}).get("candidates", [])
-            if status == "awaiting_source_selection"
-            else []
+            data.get("pending_payload", {}).get("candidates", []) if at_sources else []
         )
         limit = max_candidates if max_candidates > 0 else env_max
         shown = raw[:limit]
@@ -202,6 +226,7 @@ def make_tools(client: GarApiClient) -> list[McpTool]:
             ),
             candidates=candidates,
             candidate_count=len(raw),
+            directions=_to_directions(data) if at_sources else [],
         )
 
     async def review_concept(
