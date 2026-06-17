@@ -511,9 +511,12 @@ GAR_API_URL=http://localhost:8000 uv run --package gar-backend gar-mcp
 
 Configuration is by environment: `GAR_API_URL` (default
 `http://localhost:8000`), `GAR_API_KEY` (optional bearer token),
-`GAR_MCP_ROLE` (`public` by default). See [`docs/mcp.md`](docs/mcp.md)
-for the `.mcp.json` (Claude Code) and Claude Desktop config, the tool
-list, and why the surface is the gates rather than the raw tools.
+`GAR_MCP_ROLE` (`public` by default). For the client config, copy
+`.mcp.json.example` (Claude Code) or run
+`./scripts/print-mcp-config.sh claude-desktop` to get a paste-ready block
+with the absolute path filled in. See [`docs/mcp.md`](docs/mcp.md) for
+both, the tool list, and why the surface is the gates rather than the raw
+tools.
 
 ### Optional configuration (retrieval & cost)
 

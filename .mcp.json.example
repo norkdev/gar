@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "gar": {
+      "command": "./scripts/gar-mcp.sh",
+      "env": {
+        "GAR_API_URL": "http://localhost:8000",
+        "GAR_MCP_ROLE": "public"
+      }
+    }
+  }
+}

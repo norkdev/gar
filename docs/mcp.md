@@ -71,16 +71,29 @@ Notes:
 
 ## Quick start (scripts)
 
-Two helper scripts live in `scripts/`:
+Helper scripts live in `scripts/`:
 
 ```bash
-./scripts/run-backend.sh    # start the backend (foreground; the prerequisite)
-./scripts/gar-mcp.sh        # launch the MCP server (stdio; usually via the client)
+./scripts/run-backend.sh         # start the backend (foreground; the prerequisite)
+./scripts/gar-mcp.sh             # launch the MCP server (stdio; usually via the client)
+./scripts/print-mcp-config.sh    # print a ready-to-paste client config for THIS checkout
 ```
 
 `gar-mcp.sh` runs from the repo root, applies the env defaults below, warns on
 stderr if the backend is unreachable, and keeps stdout clean for the stdio
 transport. Point your MCP client at it so the config stays in one place.
+
+`print-mcp-config.sh` fills in the path for your checkout so you don't
+hand-edit it:
+
+```bash
+./scripts/print-mcp-config.sh                 # Claude Code shape (relative path)
+./scripts/print-mcp-config.sh claude-code --write   # write the repo-local .mcp.json
+./scripts/print-mcp-config.sh claude-desktop  # absolute path, to paste into Desktop
+```
+
+It only prints (and, with `--write`, drops the repo-local `.mcp.json`); it
+never edits your client's own config file.
 
 ## Configuration
 
@@ -98,7 +111,15 @@ running** (locally or, after the AWS migration, remotely). Only
 
 ## Claude Code
 
-Create a `.mcp.json` at the repository root, pointing at the launch script:
+Create a `.mcp.json` at the repository root, pointing at the launch script.
+Fastest is to copy the tracked template or let the helper write it:
+
+```bash
+cp .mcp.json.example .mcp.json            # or:
+./scripts/print-mcp-config.sh claude-code --write
+```
+
+Either yields:
 
 ```json
 {
@@ -114,17 +135,23 @@ Create a `.mcp.json` at the repository root, pointing at the launch script:
 }
 ```
 
-(Or skip the script and use `"command": "uv", "args": ["run", "--package",
-"gar-backend", "gar-mcp"]` directly.) Start the backend first
+(`.mcp.json` is gitignored, like `.env`; `.mcp.json.example` is tracked. Or
+skip the script entirely with `"command": "uv", "args": ["run", "--package",
+"gar-backend", "gar-mcp"]`.) Start the backend first
 (`./scripts/run-backend.sh`), then Claude Code launches `gar-mcp` on demand
 and the `gar` tools become available.
 
 ## Claude Desktop
 
-Add the server to `claude_desktop_config.json` (macOS:
-`~/Library/Application Support/Claude/claude_desktop_config.json`). Use an
-absolute path to `uv` and the repo via `--directory` so it resolves
-outside your shell:
+Desktop has no project cwd, so it needs an **absolute** path. Generate the
+block for your checkout and paste it into `claude_desktop_config.json`
+(macOS: `~/Library/Application Support/Claude/claude_desktop_config.json`):
+
+```bash
+./scripts/print-mcp-config.sh claude-desktop
+```
+
+which prints (with your real path filled in):
 
 ```json
 {
@@ -132,7 +159,8 @@ outside your shell:
     "gar": {
       "command": "/absolute/path/to/gar/scripts/gar-mcp.sh",
       "env": {
-        "GAR_API_URL": "http://localhost:8000"
+        "GAR_API_URL": "http://localhost:8000",
+        "GAR_MCP_ROLE": "public"
       }
     }
   }
