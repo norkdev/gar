@@ -28,13 +28,17 @@ mechanism on its own. "Guided" sits at the surface because the agent is
 not fully autonomous; "governance" describes how that guidance is enforced
 inside.
 
-> Status: v1 backend complete; 289 unit / integration tests passing;
-> end-to-end smoke runs against the live arXiv API and the Anthropic
-> Claude API have produced complete, cited reports. A third client — an
-> MCP server (`gar-mcp`) exposing the governed gates over stdio — ships
-> alongside the CLI and Web UI. Frontend is a minimal React/TypeScript
-> shell with a rendered Markdown preview. AWS infra (CDK) synthesises but
-> defines no resources yet.
+> Status (v1.3.2): v1 backend complete; 357 unit / integration tests
+> passing; end-to-end smoke runs against the live arXiv and Anthropic
+> Claude APIs have produced complete, cited reports, driven over both the
+> Web UI and the MCP server. Retrieval has grown a swappable **rerank
+> stack** (dependency-free BM25 by default; opt-in **semantic reranking**
+> via an external embeddings API) and embedding-based **clustering** that
+> turns the candidate pool into a positioning map. **Per-phase model
+> tiers** (Haiku for the cheap, high-volume phases; Sonnet for the report)
+> cut cost. A third client — an MCP server (`gar-mcp`) exposing the
+> governed gates over stdio — ships alongside the CLI and Web UI. AWS infra
+> (CDK) synthesises but defines no resources yet.
 
 ---
 
@@ -181,9 +185,9 @@ to understand what the agent actually did on a given run reads
                                      │              │           │
                                      ▼              ▼           ▼
                                   arXiv API   Anthropic API   Local vault
-                                  (rate-      (Claude         (Markdown
-                                  limited,    Sonnet 4.6)     files + .ignore)
-                                  back-off)
+                                  (rate-      (Claude Haiku   (Markdown
+                                  limited,    + Sonnet,       files + .ignore)
+                                  back-off)   per phase)
 ```
 
 - **Frontend**: 5 views routed by `RunState.status`; SSE during long POSTs
@@ -196,6 +200,12 @@ to understand what the agent actually did on a given run reads
 - **Private source**: the user's Markdown idea notes (an Obsidian vault
   or any folder). v1 reads `.md` only; `.gitignore` and `.ignore` are
   honored.
+- **Reranker**: candidates are ordered by concept-relevance before the
+  sources gate. Default is dependency-free BM25; an opt-in semantic
+  reranker calls an external embeddings API (Voyage) and additionally
+  clusters the pool into topic *directions* (see the two sections below).
+  Voyage is therefore an optional fourth external dependency, used only
+  when semantic reranking is enabled.
 
 The intended deployment target is AWS (Lambda + Function URLs + Step
 Functions + DynamoDB + S3 + Cognito + KMS) — see `infra/`. Resources are
@@ -207,22 +217,90 @@ v1 code already.
 ## Retrieval treated as a design judgement, not a hardcoded choice
 
 Different retrieval methods (keyword, semantic search, rerank, ...) have
-different failure modes. v1 ships only keyword search — but the **structure
-of the codebase treats retrieval as an interchangeable tool inside the
-agent loop**, not as a fixed step before generation:
+different failure modes, so the codebase treats retrieval as an
+**interchangeable technique inside the agent loop**, not a fixed step
+before generation. What began as a seam is now a working stack:
 
-- `PublicSource` is a Protocol. arXiv is the v1 implementation; future
-  sources (semantic search, vector indexes, other catalogues) plug in
-  behind the same shape.
-- Every retrieval call produces a `SearchResult` with a stable
-  `(source_name, external_id)` pair so the grounding validator works
-  uniformly across sources.
-- Each tool call is audited with input, output count, and duration, so
-  later evaluation phases can compare retrieval techniques head-to-head.
+- **Recall-first search.** The search phase is prompted for breadth —
+  decompose the concept into facets, query each with varied wording — and
+  the user's original note phrases are injected alongside the summarized
+  concept so distinctive terms aren't lost. A `recall@K` instrument
+  (`retrieval/recall.py`) measures how much of a known relevant set the
+  search recovers.
+- **A swappable reranker.** Candidates are ordered by concept-relevance
+  before the sources gate, behind a `Reranker` Protocol
+  (`retrieval/rerank.py`). The default is **BM25** — dependency-free,
+  deterministic, always available. `GAR_RERANKER=embedding` swaps in a
+  **semantic reranker** (`retrieval/embedding.py`) that scores by cosine
+  similarity over an external embeddings API (Voyage by default; any
+  OpenAI-style endpoint). Why bother: lexical signals reward vocabulary
+  *overlap*, so they surface generic high-frequency-term papers and bury
+  relevant work phrased differently — a bias measured on live runs (see
+  `plan.md` §5–§6). Embeddings score by *meaning* and correct it. If the
+  embeddings API errors, the reranker logs a warning and falls back to
+  BM25 — a rerank failure never fails a run.
+- **Cross-query provenance.** Each candidate records which query angles
+  surfaced it (`support` / `matched_queries`), carried to the sources gate
+  as metadata.
+- **One shape, uniform downstream.** `PublicSource` is a Protocol (arXiv
+  is the v1 implementation; PubMed / Semantic Scholar / vector indexes
+  plug in behind the same shape), and every retrieval call produces a
+  `SearchResult` with a stable `(source_name, external_id)` pair, so the
+  grounding validator and the reranker work identically across sources.
 
-The audit log was built with this in mind: rerunning a saved set of
-queries against a different retrieval implementation is a future-work
-direction the data already supports.
+Every retrieval and rerank call is audited with input, output count, and
+duration — so comparing techniques head-to-head, or replaying a saved
+query set against a different implementation, is something the data
+already supports.
+
+---
+
+## From a list to a map: clustering candidates into directions
+
+A survey that hands back 300 candidates as one flat list pushes all the
+sense-making onto the human. When the semantic reranker is enabled, GAR
+goes further and **clusters the candidate pool into topic "directions"** —
+reusing the embeddings it already computed for reranking (memoized, so no
+extra API cost).
+
+- **How.** A small, dependency-free k-means (`retrieval/directions.py`)
+  over the unit-normalized embeddings, with deterministic seeding so a run
+  is reproducible. Each cluster gets representative titles (its
+  centroid-nearest members); the cluster the *concept* embedding falls in
+  is flagged "nearest your idea."
+- **In the report.** The compose phase names each direction and writes a
+  **positioning map** in §4 — where the idea sits among the directions,
+  which are core vs. adjacent vs. out of scope — still hedged, still
+  leaving the novelty judgement to the human.
+- **At the sources gate (Web UI).** Candidates are presented **grouped by
+  direction**, concept-nearest first, off-topic groups collapsed, with an
+  "adopt the top N of this group" shortcut. The grouping is server-side
+  structure available to any client, so it stays consistent rather than
+  improvised per client.
+- **Robustness.** Only the top-N most relevant candidates are clustered
+  (`GAR_DIRECTIONS_POOL`, default 200). Because the list is rerank-ordered,
+  this drops the off-topic tail — which, left in, lets the far-apart
+  seeding pick outliers as cluster centers and collapse everything
+  on-topic into one mega-cluster (a degeneration observed live; see
+  `plan.md` §6).
+- **Graceful absence.** In BM25 mode there are no embeddings and therefore
+  no directions: the report omits the map and the gate shows a single
+  relevance-ordered list. Nothing breaks.
+
+---
+
+## Cost: per-phase model tiers
+
+The agent doesn't use one model for everything. A `ModelPolicy` assigns a
+model per phase: **Haiku** for concept derivation and the search loop (the
+token-heaviest phase, where abstracts accumulate in context), and
+**Sonnet** for composing the report (the human-facing deliverable, where
+citation discipline and hedged synthesis matter most). Each call records
+its model in the audit log, so a run's trace shows which tier ran where.
+Any phase can be overridden (`GAR_MODEL_DERIVE` / `GAR_MODEL_SEARCH` /
+`GAR_MODEL_COMPOSE`), and `GAR_THOROUGH=1` escalates the search phase to
+the compose-tier model for a high-stakes run. The LLM client stays a
+Protocol, so the Anthropic↔Bedrock swap is unaffected.
 
 ---
 
@@ -300,8 +378,15 @@ Configure it for Claude Code with a repo-root `.mcp.json`; see
 
 - Read a single Markdown file or a folder of them; honor `.gitignore` and
   a sibling `.ignore` (used by the tool itself to skip its own reports).
-- Derive a concise concept from the user's notes via Claude.
-- Search arXiv iteratively with the agent loop deciding queries.
+- Derive a concise concept (a lead sentence + facet bullets) from the
+  user's notes via Claude.
+- Search arXiv iteratively with the agent loop deciding queries,
+  prioritizing recall (facet / synonym breadth + original-note phrases).
+- Rerank candidates by concept-relevance — BM25 by default, opt-in
+  semantic embeddings — and cluster them into topic *directions*, surfaced
+  as a positioning map in the report and a grouped sources gate in the UI.
+- Run each phase on a cost-appropriate model tier (Haiku for
+  derive / search, Sonnet for the report).
 - Let the user edit the concept, select adopted candidates, and approve
   the final report.
 - Compose a structured Markdown report with required sections (concept,
@@ -322,6 +407,10 @@ Configure it for Claude Code with a repo-root `.mcp.json`; see
   IEEE Xplore — each one is a new `PublicSource` implementation.
 - **Web search**. The grounding side is designed to accept Text Fragments
   URLs as citations, but no web-search adapter is wired.
+- **Structure-aware candidate selection & count-sizing.** Directions
+  cluster the pool, but selecting a diverse top-set (MMR-style) and
+  probing result counts to size the search up front are future work
+  (see `plan.md` §6).
 - **Multi-tenant runtime**. The seams are in (`tenant_id` on every
   record; authz check at the API boundary; ToolRegistry is per-context),
   but v1 has one user.
@@ -426,10 +515,26 @@ Configuration is by environment: `GAR_API_URL` (default
 for the `.mcp.json` (Claude Code) and Claude Desktop config, the tool
 list, and why the surface is the gates rather than the raw tools.
 
+### Optional configuration (retrieval & cost)
+
+All optional; sensible defaults shown. Set in `.env` (backend) or in the
+MCP / CLI environment. With the defaults the backend needs no extra
+service and no embeddings key.
+
+| Variable | Default | Effect |
+|---|---|---|
+| `GAR_RERANKER` | `bm25` | `embedding` enables semantic rerank + directions clustering |
+| `VOYAGE_API_KEY` / `GAR_EMBED_API_KEY` | _(unset)_ | embeddings API key (required for `embedding` mode) |
+| `GAR_EMBED_MODEL` / `GAR_EMBED_URL` | `voyage-3.5` / Voyage | override the embeddings model / endpoint |
+| `GAR_DIRECTIONS_K` | auto: `clamp(round(n/40),3,7)` | number of clusters |
+| `GAR_DIRECTIONS_POOL` | `200` | top-relevance candidates to cluster (drops the off-topic tail) |
+| `GAR_MODEL_DERIVE` / `_SEARCH` / `_COMPOSE` | Haiku / Haiku / Sonnet | per-phase model override |
+| `GAR_THOROUGH` | _(off)_ | escalate the search phase to the compose-tier model |
+
 ### Tests
 
 ```bash
-uv run --package gar-backend pytest backend/tests/   # 289 tests
+uv run --package gar-backend pytest backend/tests/   # 357 tests
 (cd frontend && npm run build)                       # type-check + bundle
 ```
 
@@ -467,8 +572,18 @@ backend/src/gar_backend/
 │   ├── naming.py       date-based filenames + .ignore accounting
 │   ├── builder.py      save composed report to vault
 │   └── linkify.py      turn citations into Markdown links
-└── state/
-    └── runs.py         RunStore Protocol + InMemoryRunStore
+├── retrieval/
+│   ├── rerank.py       Reranker Protocol + BM25 (default)
+│   ├── embedding.py    opt-in semantic reranker + directions clustering
+│   ├── directions.py   k-means over embeddings → topic directions
+│   └── recall.py       recall@K instrument
+├── state/
+│   └── runs.py         RunStore Protocol + InMemoryRunStore
+└── mcp_server/         FastMCP gates over stdio — thin REST client
+    ├── server.py       entry point (gar-mcp)
+    ├── tools.py        gate tools + dispatch
+    ├── client.py       httpx wrapper (X-GAR-Client: mcp)
+    └── models.py       Pydantic I/O shared with the API
 
 frontend/src/
 ├── App.tsx             status-driven view router
@@ -479,7 +594,7 @@ frontend/src/
                         FinalReport / Completed / Activity (SSE feed)
 
 infra/                  AWS CDK (Python) — 5 stacks, currently scaffolded
-backend/tests/          221 tests, mirrors src/ layout
+backend/tests/          357 tests, mirrors src/ layout
 spec.md                 Working spec (Japanese)
 CLAUDE.md               Notes for Claude Code working in this repo
 ```
@@ -495,6 +610,12 @@ CLAUDE.md               Notes for Claude Code working in this repo
   applies a 3 → 6 → 12-second exponential back-off on HTTP 429 and on
   read timeouts.
 - LLM inference is via the Anthropic Claude API.
+- When semantic reranking is enabled (`GAR_RERANKER=embedding`), candidate
+  title+abstract text and the derived concept are embedded via the Voyage
+  AI API. This is **opt-in**; the default BM25 path uses no external
+  embeddings service. (The concept already goes to the LLM provider, so
+  the marginal exposure is small — and it stays local under the default
+  reranker.)
 - This is a personal project. No employer code, customer data, or
   internal know-how is in this repository.
 

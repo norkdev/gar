@@ -6,8 +6,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 **v1 backend complete + verified end-to-end against live arXiv + Anthropic APIs.** Monorepo as a uv workspace; three siblings:
 
-- `backend/` — FastAPI + agent loop + governance + sources/ideas/state/reports, plus an MCP server (`mcp_server/`, entry point `gar-mcp`) that exposes the governed gates over stdio as a third client (see `plan.md` / `docs/mcp.md`). 289 unit / integration tests passing. End-to-end smoke produced a complete, cited Markdown report; the grounding-retry path fired and recovered in production (LLM emitted 2 unknown citations on first compose; auto re-prompt produced a clean report on attempt 2).
-- `frontend/` — Vite + React + TypeScript. 5 views (Start / ConceptReview / SourceSelection / FinalReport / Completed) plus a live `Activity` SSE feed. Builds cleanly; browser smoke pending.
+- `backend/` — FastAPI + agent loop + governance + sources/ideas/state/reports + `retrieval/`, plus an MCP server (`mcp_server/`, entry point `gar-mcp`) that exposes the governed gates over stdio as a third client (see `plan.md` / `docs/mcp.md`). Retrieval has a swappable `Reranker` (dependency-free BM25 default; opt-in Voyage embeddings via `GAR_RERANKER=embedding`), embedding **directions clustering** (report positioning map + grouped sources gate), a `recall@K` instrument, and **per-phase model tiers** (Haiku for derive/search, Sonnet for compose; `GAR_MODEL_*` / `GAR_THOROUGH`). 357 unit / integration tests passing. End-to-end smoke produced a complete, cited Markdown report; the grounding-retry path fired and recovered in production (LLM emitted 2 unknown citations on first compose; auto re-prompt produced a clean report on attempt 2).
+- `frontend/` — Vite + React + TypeScript. 5 views (Start / ConceptReview / SourceSelection / FinalReport / Completed) plus a live `Activity` SSE feed. Builds cleanly; browser smoke passed end-to-end (incl. the directions-grouped sources gate).
 - `infra/` — AWS CDK (Python) with five empty stacks (`Data` / `Workflow` / `Backend` / `Frontend` / `Auth`). Synthesizes successfully; no resources defined yet.
 
 Public-facing design narrative lives in `README.md`; design constraints / non-negotiables in `spec.md`.
@@ -53,7 +53,7 @@ uv sync --all-packages              # install all Python workspace deps
 
 ```bash
 # Backend
-uv run --package gar-backend pytest backend/tests/                   # 207 tests
+uv run --package gar-backend pytest backend/tests/                   # 357 tests
 uv run --package gar-backend uvicorn gar_backend.main:app --reload   # dev server
 # → http://localhost:8000/healthz; OpenAPI at /docs
 
