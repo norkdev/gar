@@ -30,6 +30,9 @@ audit*.jsonl
 .env.local
 .env.*.local
 
+# Local MCP client config (copy from .mcp.json.example); the example is tracked
+.mcp.json
+
 # Local-only design notes (kept out of the public repo)
 implementation_brief.md
 
