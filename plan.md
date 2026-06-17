@@ -560,3 +560,42 @@ bullets, and confirmed proper-term preservation. Recall is 281 items (the prose
 version was 313 items) — within the range of the agent search's query jitter, no
 significant drop, and the TOP is PersonaX (the core user-modeling), with relevance
 also maintained.
+
+---
+
+## 9. Report-gate rejection / recompose-with-feedback (future enhancement)
+
+**Status: not implemented (idea, recorded 2026-06-18).** v1.1 has **no functional
+"reject"** at the report gate in either client:
+
+- The browser `FinalReport` view exposes only "Approve & save."
+- MCP `approve_report` accepts `action="reject"` in the schema, but raises a "not
+  supported in v1.1" error in the MCP tool layer (`mcp_server/tools.py`) — *before*
+  any backend call. The schema shape is kept only for forward compatibility.
+- To not accept a report today, the only move is to **abandon the run**. (Concept
+  *editing* is the one real non-approve action — `review_concept(action="edit")` and
+  the browser edit box; the sources gate also lets you adopt zero.)
+
+**Audit note.** Because the MCP reject raises before `client.gate_report()` and the
+MCP server has no audit path of its own (all auditing is backend-side, attributed via
+the `X-GAR-Client` header), a reject *attempt* produces **no `audit.jsonl` record** —
+only the client conversation shows the error. The reject is a pure no-op (no state
+change, no LLM call), so functionally there's nothing to audit; but strictly it is a
+small gap against the "every tool call recorded, no shadow path" audit claim.
+
+**The enhancement.** Add a real report-gate transition — **reject → recompose with
+feedback** (re-run `phase_compose_report` with the human's feedback folded into the
+prompt), or a plain **discard** — in the backend (`governance/hitl.py` +
+`api/gates.py` + `agent/loop.py`). Then expose it in both clients:
+
+- Browser: a **Reject** button on `FinalReport` that collects feedback.
+- MCP: wire `approve_report(action="reject", feedback=…)` to round-trip to the
+  backend instead of raising.
+
+**Build backend-first** so both clients share one transition and the audit is
+automatic: once the reject hits the backend it is recorded like any other gate call
+(with `client` + feedback), which also closes the audit gap above. Don't special-case
+auditing the no-op error in the thin MCP client. The MCP `approve_report` schema is
+already forward-compatible (it carries `reject`), so the client surface doesn't change
+shape — only its behavior. Relatedly, a bounded recompose loop should be careful not
+to recurse indefinitely (cap attempts, like the grounding-retry loop).
