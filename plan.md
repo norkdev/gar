@@ -599,3 +599,136 @@ auditing the no-op error in the thin MCP client. The MCP `approve_report` schema
 already forward-compatible (it carries `reject`), so the client surface doesn't change
 shape — only its behavior. Relatedly, a bounded recompose loop should be careful not
 to recurse indefinitely (cap attempts, like the grounding-retry loop).
+
+---
+
+## 10. v2 — identity, data governance, and sessions (design, 2026-06-18)
+
+**Status: design only (v2 / AWS phase). No v1 code.** This section captures the
+data-governance model for the persistent, multi-user version and the *Sessions*
+product feature that motivates it. It refines Phase 2 (§3) and folds in spec §2(b)
+(public/private separation) and the scale seams (§10 of spec). v1 stays as-is —
+everything here is ephemeral-friendly and activates seams already present.
+
+### The real invariant (what segregation actually protects)
+
+The concern is **not** "private content must never leave the machine" — the concept
+and notes already go to the LLM/embeddings provider, and idea-derived *terms* must go
+to public archives to find related work (that's the task). The invariant is: **idea-
+linked data and public data must not co-mingle in a way that exposes the private idea
+— specifically across users/tenants, or in a shared/public store.** v1 satisfies this
+trivially because everything is ephemeral and per-run; the risk appears when v2
+**persists** artifacts.
+
+### D-201: classify by idea-linkage, not byte-provenance ("mixed → owner-scoped")
+
+An artifact is private not because of the bytes it contains but because it encodes a
+**linkage to the private idea**: its framing (the concept), its position (concept-
+nearest cluster), its selection (the adopted set), or its derivation. Public bytes
+with the linkage stripped can be public.
+
+- **"Private" means owner-scoped / tenant-isolated, NOT "may never co-mingle."** Within
+  one owner's boundary, concept + candidates + report in one record is fine — it's their
+  own data. The harm is only (a) crossing to **another tenant**, or (b) landing idea-
+  linked data in a **shared/public** store.
+- **Strip-the-linkage-to-share:** a topic clustering of public papers is shareable; the
+  `contains_concept` flag and "computed for idea X" privatize it. Selection lists too —
+  each arXiv id is public, but "the set this user adopted for their idea" is revealing.
+
+| Artifact | Class | Store (v2) |
+|---|---|---|
+| Raw notes | private | private, per-tenant, encrypted — never shared |
+| arXiv results / search cache | public | the **only** deliberately shared store (pure public) |
+| Derived concept | private | private (the idea, distilled) |
+| Directions / clusters | mixed (idea-linked) | private/owner-scoped |
+| RunState / session | mixed | private, tenant-isolated |
+| Report | mixed | private/owner |
+| Audit log | metadata today (private if it logs content) | private, per-tenant |
+
+**Caveat — the shared public cache is a side channel.** A shared, enumerable search
+cache is a query-existence oracle (tenant B infers tenant A's research directions from
+cache hits). For a rate-limited archive the savings may not justify it → per-tenant
+cache, or hash-keyed/non-enumerable.
+
+### D-202: two boundaries — tenant (isolation/residency) vs user (idea-privacy)
+
+Model **both from day one**, even while they coincide, so personal → org is data+policy,
+not a rewrite. **A tenant is a workspace that can hold N users — exactly one in the
+minimal case.** Signup creates a workspace (tenant) + its first user (owner).
+
+- **`tenant_id`** — isolation/residency boundary: CMK, region, billing, one-shot
+  deletion key off this. The **hard** wall; never relaxed.
+- **`user_id`** — idea-privacy boundary: whose private content this is.
+- **`AccessContext`** grows from `(tenant_id, role)` → `(tenant_id, user_id, role)`.
+  Records carry `tenant_id` + `owner_user_id`.
+- **Two-axis access check** on every run/gate/session access:
+  (i) tenant isolation `caller.tenant_id == record.tenant_id` — hard;
+  (ii) idea-privacy `caller.user_id == record.owner_user_id` **or an explicit grant** —
+  relaxable only via sharing.
+- **`owner_user_id` is the user, not the tenant** — even in a multi-user org, one
+  researcher's private idea stays user-scoped; colleagues don't see it by sharing a
+  billing boundary.
+
+### D-203: minimal identity integration (v2.0), expansion left as a seam
+
+The whole integration is **one point**: `api/auth.py` / `api/deps.py` stop returning a
+constant and instead **verify the Cognito JWT** (issuer / JWKS / audience), read `sub →
+user_id` and a `custom:tenant_id` (or workspace lookup) → `tenant_id`, and build the
+`AccessContext`. Everything downstream — RBAC `tools_for`, the gates, the stores —
+already consumes it.
+
+- **Ships minimal:** Cognito auth → `AccessContext(tenant_id, user_id, role)`; tenant =
+  one-user workspace; the two-axis check (passes trivially); per-tenant store keys;
+  tenant/account deletion. An *identity + isolation* layer, not an org product.
+- **Deferred, seam-ready (no rewrite):** multiple users per tenant; **sharing as an
+  explicit grant** (`shared_with` / `tenant_visible`, consulted only by check (ii));
+  org/admin management; richer roles. Adding these inserts grant records and relaxes one
+  half of one check — the isolation wall and store partitioning never move.
+- **Sharing must be explicit and linkage-aware** — never a side effect of tenant
+  membership. That line keeps the private-idea stance intact under multi-user.
+- Sequenced in spec §13: Cognito + multi-tenant (team) → per-tenant CMK → IdP federation
+  (regulated). v2.0 is the first rung.
+
+### D-204: Sessions — the persistent product surface
+
+A **session** is a persisted, idea-linked **deliverable bundle**: `{derived concept,
+selected literatures, clusters, final report}`. The user can list, view, download, and
+delete sessions in the cloud. This is the centerpiece v2 product feature — and the
+concrete reason D-201–D-203 exist.
+
+- **Store the deliverable, not the working set.** Persist the concept, the *adopted*
+  sources (with metadata), the session's directions/clusters, and the report markdown —
+  **not** the raw 300-candidate pool (large, ephemeral, the most public-volume data).
+  Sessions stay storage-light and privacy-tight; the bundle is exactly the idea-linked
+  artifact set.
+- **A session is the persisted `RunState`** (or a projection of it). Persistence is
+  seam #3 (in-memory `RunStore` → DynamoDB); a paused run is resumable via seam #4
+  (durable HITL), so "my sessions" spans **finished and in-progress** runs.
+- **CRUD maps onto the model:**
+  - *list / view* → the two-axis access check (D-202) — owner + tenant.
+  - *download* → export the owner's own artifact (report `.md`, or a bundle with a small
+    JSON of concept / selected sources / clusters so it round-trips).
+  - *delete* → **right-to-be-forgotten**: purge the owner-scoped record + its S3 objects;
+    with per-tenant CMK later, crypto-shredding.
+- **Fixes a current gap:** today a completed run's report is dropped (`get_report` works
+  only at the report gate). Sessions require **retaining the final report** in the
+  session record (or S3, referenced).
+
+### Open tensions (decide at implementation time)
+
+- **Delete vs. audit retention.** Hard-delete (the privacy default) conflicts with the
+  audit pillar's "every step recorded, replayable." Personal product: the audit log is
+  owner-scoped, so deleting a session may purge/redact its audit entries (the user owns
+  their trace). Regulated deployment: compliance retention may override user deletion — a
+  policy knob, not a v2.0 decision.
+- **Data residency** tightens via existing seams: the `LLMClient → Bedrock` swap is also a
+  residency lever (inference in-account/region), and per-tenant CMK isolates at rest.
+- **Cache side channel** (D-201 caveat) — resolve when the persistent cache is built.
+
+### Why this is expansion, not a rewrite
+
+Every piece rides a seam already in v1: `tenant_id` on every record (#1), auth check at
+the API boundary (#7), `AccessContext` built in one place, `RunStore` Protocol (#3),
+durable-HITL state (#4), and the empty `Auth` CDK stack. Minimal v2 pays for **one extra
+field (`user_id` / `owner_user_id`) and one extra check axis** up front; the personal
+version then *is* the product version with the multi-user dimension dormant.
