@@ -28,17 +28,20 @@ mechanism on its own. "Guided" sits at the surface because the agent is
 not fully autonomous; "governance" describes how that guidance is enforced
 inside.
 
-> Status (v1.3.2): v1 backend complete; 357 unit / integration tests
-> passing; end-to-end smoke runs against the live arXiv and Anthropic
-> Claude APIs have produced complete, cited reports, driven over both the
-> Web UI and the MCP server. Retrieval has grown a swappable **rerank
+> Status (v2.0.0): backend complete and **deployed to AWS** (Lambda +
+> DynamoDB + S3 + Secrets Manager), verified live; 403 unit / integration
+> tests passing; end-to-end smoke runs against the live arXiv and Anthropic
+> Claude APIs have produced complete, cited reports, driven over the
+> Web UI, the MCP server, and the cloud deployment. Retrieval has a swappable **rerank
 > stack** (dependency-free BM25 by default; opt-in **semantic reranking**
 > via an external embeddings API) and embedding-based **clustering** that
 > turns the candidate pool into a positioning map. **Per-phase model
 > tiers** (Haiku for the cheap, high-volume phases; Sonnet for the report)
 > cut cost. A third client — an MCP server (`gar-mcp`) exposing the
-> governed gates over stdio — ships alongside the CLI and Web UI. AWS infra
-> (CDK) synthesises but defines no resources yet.
+> governed gates over stdio — ships alongside the CLI and Web UI. **v2.0**
+> lifts the same backend to AWS (Lambda + DynamoDB + S3 + Secrets Manager,
+> async self-invoke worker, API-key gate), deployed and verified live;
+> per-user identity and browser hosting are v2.1.
 
 ---
 
@@ -190,10 +193,12 @@ to understand what the agent actually did on a given run reads
                                   back-off)   per phase)
 ```
 
-- **Frontend**: 5 views routed by `RunState.status`; SSE during long POSTs
-  for live activity feed; the final report renders as Markdown.
-- **Backend**: agent loop runs synchronously within each gate POST; state
-  persists across requests via `RunStore` (in-memory in v1).
+- **Frontend**: 5 views routed by `RunState.status`; the final report renders
+  as Markdown. (v1 showed a live SSE activity feed during long POSTs; v2.0
+  replaced it with polling — see the v2.0 section.)
+- **Backend**: in v1 the agent loop runs synchronously within each gate POST;
+  state persists across requests via `RunStore` (in-memory in v1, DynamoDB in
+  v2.0). v2.0 runs the loop off the request thread (async worker).
 - **Public source**: arXiv via its public API. The implementation is
   generic (`PublicSource` Protocol) so adding PubMed / Semantic Scholar /
   Crossref later is a localized change.
@@ -486,13 +491,15 @@ Configure it for Claude Code with a repo-root `.mcp.json`; see
   (see `plan.md` §6).
 - **Multi-tenant runtime**. The seams are in (`tenant_id` on every
   record; authz check at the API boundary; ToolRegistry is per-context),
-  but v1 has one user.
-- **AWS deployment**. CDK stacks are scaffolded; resources are not yet
-  defined.
-- **Bedrock-backed LLM**. The `LLMClient` Protocol is the swap point;
-  v1 only ships the Anthropic SDK implementation.
-- **Streaming token output**. SSE today streams audit events, not LLM
-  tokens.
+  but v1/v2.0 have one user. Per-user identity (Cognito) is v2.1.
+- **AWS deployment**. v2.0 deploys the backend (Lambda + DynamoDB + S3 +
+  Secrets Manager) — see the "Architecture (v2.0)" section and
+  `docs/deploy.md`. Step Functions orchestration and per-tenant CMK are v2.2.
+- **Bedrock-backed LLM**. The `LLMClient` Protocol is the swap point and the
+  config slot is wired (`GAR_LLM_PROVIDER`, `BedrockLLM` stub); the Bedrock
+  call itself is unimplemented.
+- **Streaming token output**. The SSE endpoint streams audit events, not LLM
+  tokens; the browser no longer consumes it (it polls).
 
 ---
 
@@ -547,6 +554,21 @@ The backend writes its audit log to `./audit.jsonl` (gitignored). The
 frontend's Vite dev server proxies `/runs` and `/healthz` to the backend
 so the page can use relative URLs.
 
+### Deploying to AWS (v2.0)
+
+The same backend runs on AWS — see **`docs/deploy.md`** for the full
+deploy / re-deploy / destroy runbook. In short, from `infra/` with `deploy`
+credentials exported and Docker running:
+
+```bash
+cdk deploy GarDataStack GarBackendStack --require-approval never
+```
+
+then set the Anthropic key into its Secrets Manager secret and point clients
+(MCP server: `GAR_API_URL` + `GAR_API_KEY`) at the Function URL. The DynamoDB
+table, S3 (state pool + audit log), Lambda, Secrets Manager, and the
+`X-GAR-API-Key` gate come up as one stack pair.
+
 ### CLI — local-mode shortcut
 
 For terminal users who don't want a browser in the loop:
@@ -583,8 +605,9 @@ GAR_API_URL=http://localhost:8000 uv run --package gar-backend gar-mcp
 ```
 
 Configuration is by environment: `GAR_API_URL` (default
-`http://localhost:8000`), `GAR_API_KEY` (optional bearer token),
-`GAR_MCP_ROLE` (`public` by default). For the client config, copy
+`http://localhost:8000`), `GAR_API_KEY` (app key, sent as `X-GAR-API-Key`;
+required for the cloud backend, optional locally), `GAR_MCP_ROLE` (`public` by
+default). For the client config, copy
 `.mcp.json.example` (Claude Code) or run
 `./scripts/print-mcp-config.sh claude-desktop` to get a paste-ready block
 with the absolute path filled in. See [`docs/mcp.md`](docs/mcp.md) for
@@ -610,13 +633,14 @@ service and no embeddings key.
 ### Tests
 
 ```bash
-uv run --package gar-backend pytest backend/tests/   # 357 tests
+uv run --package gar-backend pytest backend/tests/   # 403 tests
 (cd frontend && npm run build)                       # type-check + bundle
 ```
 
 Tests are offline: the arXiv source is exercised via `httpx.MockTransport`;
-the LLM client is mocked via a stub that returns pre-baked `LLMResponse`s.
-No tests require a real API key.
+the LLM client is mocked via a stub that returns pre-baked `LLMResponse`s;
+AWS is mocked with `moto` (DynamoDB / S3 / Secrets Manager). No tests require
+a real API key or live AWS.
 
 ---
 
@@ -624,19 +648,22 @@ No tests require a real API key.
 
 ```
 backend/src/gar_backend/
-├── main.py             FastAPI app + Mangum hook for Lambda
+├── main.py             FastAPI app + Mangum handler (HTTP + async worker event)
+├── secrets.py          resolve Anthropic / app keys (env or Secrets Manager)
 ├── api/                HTTP layer
 │   ├── runs.py         POST /runs, GET /runs, GET /runs/{id}
 │   ├── gates.py        POST /runs/{id}/gates/{concept,sources,report}
-│   ├── stream.py       GET /runs/{id}/events  (SSE)
+│   ├── stream.py       GET /runs/{id}/events  (SSE; unused by the v2 browser)
+│   ├── segments.py     run a segment off the request (in-process / Lambda self-invoke)
+│   ├── agent_wiring.py build AgentContext from a request or a stored run
 │   ├── deps.py         DI providers (singletons; overridden in tests)
-│   └── auth.py         v1 pass-through; the call site for future auth
+│   └── auth.py         X-GAR-API-Key gate (disabled when no key configured)
 ├── agent/
 │   ├── loop.py         orchestrator + 3 phase functions
 │   ├── prompts.py      system prompts per phase
 │   ├── tools.py        AgentTool wrappers + dispatch w/ audit
-│   └── llm.py          LLMClient Protocol + AnthropicLLM
-├── governance/         audit / hitl / grounding / rbac  (one file each)
+│   └── llm.py          LLMClient Protocol + AnthropicLLM + BedrockLLM (seam)
+├── governance/         audit (file + S3 sinks) / hitl / grounding / rbac
 ├── sources/
 │   ├── base.py         PublicSource Protocol + SearchResult
 │   └── arxiv.py        arXiv source w/ ToU-compliant rate limit + 429 retry
@@ -654,23 +681,25 @@ backend/src/gar_backend/
 │   ├── directions.py   k-means over embeddings → topic directions
 │   └── recall.py       recall@K instrument
 ├── state/
-│   └── runs.py         RunStore Protocol + InMemoryRunStore
+│   └── runs.py         RunStore Protocol + InMemory + DynamoDb (S3 pool offload)
 └── mcp_server/         FastMCP gates over stdio — thin REST client
     ├── server.py       entry point (gar-mcp)
     ├── tools.py        gate tools + dispatch
-    ├── client.py       httpx wrapper (X-GAR-Client: mcp)
+    ├── client.py       httpx wrapper (X-GAR-Client + X-GAR-API-Key)
     └── models.py       Pydantic I/O shared with the API
 
 frontend/src/
 ├── App.tsx             status-driven view router
 ├── lib/
 │   ├── api.ts          typed fetch wrappers
-│   └── sse.ts          useRunStream hook
+│   ├── config.ts       base URL + API key (VITE_GAR_API_URL / _API_KEY)
+│   └── poll.ts         useRunProgress hook (polls until the next gate)
 └── views/              Start / ConceptReview / SourceSelection /
-                        FinalReport / Completed / Activity (SSE feed)
+                        FinalReport / Completed / Processing (polling)
 
-infra/                  AWS CDK (Python) — 5 stacks, currently scaffolded
-backend/tests/          357 tests, mirrors src/ layout
+infra/                  AWS CDK (Python) — Data + Backend deployed; Workflow /
+                        Frontend / Auth scaffolds (see docs/deploy.md)
+backend/tests/          403 tests, mirrors src/ layout
 spec.md                 Working spec (Japanese)
 CLAUDE.md               Notes for Claude Code working in this repo
 ```

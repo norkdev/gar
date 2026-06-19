@@ -3,8 +3,8 @@
 import pytest
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
-from gar_backend import auth
-from gar_backend.auth import API_KEY_HEADER
+from gar_backend.api import auth
+from gar_backend.api.auth import API_KEY_HEADER
 from gar_backend.main import app
 
 # --------------------------- unit: the dependency ---------------------------

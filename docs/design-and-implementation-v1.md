@@ -3,6 +3,13 @@
 *Guided Agentic Retrieval for Literature Survey*
 Status: **v1.3.2** · backend complete, verified end-to-end against live arXiv + Anthropic (+ Voyage) APIs · 360 backend tests · ~4.7k LOC backend Python, ~1.4k LOC frontend TS.
 
+> **This is a frozen v1.x snapshot.** The **v2.0** AWS lift (Lambda + DynamoDB
+> + S3 + Secrets Manager, async worker, API-key gate) came later — see the
+> "Architecture (v2.0)" section of `README.md`, `plan.md` §3.4 + D-205, and
+> the deploy runbook `docs/deploy.md`. Statements below about AWS being
+> "scaffolded, no resources" and the frontend's SSE activity feed were true
+> at v1.x and have since changed.
+
 This report consolidates the design rationale and implementation of GAR across the v1.x line. It is a synthesis of the working spec (`spec.md`), the expansion plan and its decision log (`plan.md`, D-101…D-108 + tracks §5–§9), the public narrative (`README.md`), and the code itself. Where the documents disagree, `spec.md` is the contract.
 
 ---
