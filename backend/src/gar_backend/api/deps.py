@@ -11,14 +11,26 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
+from anthropic import AsyncAnthropic
 from fastapi import Depends, Request
 
 from gar_backend.agent.llm import AnthropicLLM, LLMClient
-from gar_backend.governance.audit import KNOWN_CLIENTS, AuditLogger, FileAuditSink
+from gar_backend.governance.audit import (
+    KNOWN_CLIENTS,
+    AuditLogger,
+    FileAuditSink,
+    S3AuditSink,
+)
 from gar_backend.governance.rbac import AccessContext
+from gar_backend.secrets import resolve_anthropic_api_key
 from gar_backend.sources.arxiv import ArxivSource
 from gar_backend.sources.base import PublicSource
 from gar_backend.state.runs import RunStore, make_run_store
+
+# When set (on Lambda), the audit log is written durably to this S3 bucket
+# instead of a local file. Distinct from GAR_STATE_BUCKET so enabling the
+# DynamoDB/S3 run store doesn't implicitly move the audit log off-file.
+AUDIT_BUCKET_ENV = "GAR_AUDIT_BUCKET"
 
 DEFAULT_AUDIT_LOG_PATH = Path("audit.jsonl")
 
@@ -42,10 +54,11 @@ def get_run_store() -> RunStore:
 
 
 def get_audit_log_path() -> Path:
-    """Path to the audit log file. Source of truth shared by the file sink
-    (which writes) and the SSE endpoint (which tails). Override with
-    ``GAR_AUDIT_LOG_PATH`` — e.g. ``/tmp`` on Lambda, where the app dir is
-    read-only (the S3 audit sink replaces this file sink in a later slice)."""
+    """Path to the audit log file used by FileAuditSink (local dev). Source of
+    truth shared by the file sink (which writes) and the SSE endpoint (which
+    tails). Override with ``GAR_AUDIT_LOG_PATH``. On Lambda the durable
+    S3AuditSink is selected instead (``GAR_AUDIT_BUCKET``); this path then only
+    matters if the file sink is forced."""
     return Path(os.environ.get("GAR_AUDIT_LOG_PATH") or DEFAULT_AUDIT_LOG_PATH)
 
 
@@ -55,7 +68,9 @@ def get_audit_logger() -> AuditLogger:
     ``.for_client(...)``. HTTP routes use ``get_request_audit_logger`` instead."""
     global _audit_logger
     if _audit_logger is None:
-        _audit_logger = AuditLogger(FileAuditSink(get_audit_log_path()))
+        bucket = os.environ.get(AUDIT_BUCKET_ENV)
+        sink = S3AuditSink(bucket) if bucket else FileAuditSink(get_audit_log_path())
+        _audit_logger = AuditLogger(sink)
     return _audit_logger
 
 
@@ -84,9 +99,16 @@ def get_request_audit_logger(
 
 
 def get_llm_client() -> LLMClient:
+    """Process-wide singleton LLM client.
+
+    The API key is resolved once here (env locally, Secrets Manager on Lambda).
+    Resolving at the singleton — not per request — means the secret is fetched
+    once per cold start, not on every run."""
     global _llm_client
     if _llm_client is None:
-        _llm_client = AnthropicLLM()
+        key = resolve_anthropic_api_key()
+        inner = AsyncAnthropic(api_key=key) if key else AsyncAnthropic()
+        _llm_client = AnthropicLLM(inner)
     return _llm_client
 
 
