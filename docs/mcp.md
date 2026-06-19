@@ -102,12 +102,21 @@ All by environment variable:
 | Variable | Default | Meaning |
 |---|---|---|
 | `GAR_API_URL` | `http://localhost:8000` | GAR backend REST base URL |
-| `GAR_API_KEY` | _(unset)_ | Optional bearer token, sent on every request |
+| `GAR_API_KEY` | _(unset)_ | App API key, sent as the `X-GAR-API-Key` header |
 | `GAR_MCP_ROLE` | `public` | `public` \| `owner`; selects which tools appear |
 
 `gar-mcp` is a thin client of the REST API — **the backend must be
-running** (locally or, after the AWS migration, remotely). Only
-`GAR_API_URL` and the auth header change between the two.
+running**, locally or in AWS (v2.0). To drive the **cloud** backend, point it
+at the deployed Function URL and supply the app key:
+
+```
+GAR_API_URL=<ApiFunctionUrl>        # from the deploy outputs
+GAR_API_KEY=<app key>               # the AppApiKey secret value
+```
+
+The cloud Function URL enforces the key (`X-GAR-API-Key`); a local backend with
+no key configured ignores it. See `docs/deploy.md` for fetching the URL + key.
+Switching between local and cloud is just these two variables.
 
 ## Claude Code
 
