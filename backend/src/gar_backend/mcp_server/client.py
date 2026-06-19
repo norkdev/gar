@@ -49,8 +49,9 @@ class GarApiClient:
 
     Config resolves from explicit args first, then the environment:
     ``GAR_API_URL`` (default ``http://localhost:8000``) and ``GAR_API_KEY``
-    (optional; sent as a bearer token). ``transport`` is injectable so tests
-    drive it with ``httpx.MockTransport`` — no live backend required.
+    (optional; sent in the ``X-GAR-API-Key`` header that the backend gate
+    checks). ``transport`` is injectable so tests drive it with
+    ``httpx.MockTransport`` — no live backend required.
     """
 
     def __init__(
@@ -65,7 +66,9 @@ class GarApiClient:
         key = api_key if api_key is not None else os.environ.get("GAR_API_KEY")
         self._headers = {"X-GAR-Client": "mcp"}
         if key:
-            self._headers["Authorization"] = f"Bearer {key}"
+            # Custom header (not Authorization: Bearer) so per-user OAuth/Cognito
+            # tokens can claim Authorization in a later phase. Matches auth.py.
+            self._headers["X-GAR-API-Key"] = key
         self._client = httpx.AsyncClient(
             base_url=self._base_url,
             transport=transport,
