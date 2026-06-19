@@ -19,7 +19,7 @@ from fastapi import Depends, FastAPI
 from mangum import Mangum
 
 from gar_backend.api import gates, runs, stream
-from gar_backend.api.auth import require_api_key
+from gar_backend.api.deps import get_access_context
 from gar_backend.api.segments import WORKER_EVENT_KEY, run_worker_segment
 
 # Searches cwd and parents for `.env`; harmless if not present.
@@ -28,9 +28,11 @@ load_dotenv()
 
 app = FastAPI(title="gar-backend", version="0.1.0")
 
-# Every run/gate/stream route is gated by the API key (no-op when no key is
-# configured — local/dev). /healthz below stays open for load-balancer checks.
-_gated = [Depends(require_api_key)]
+# Every run/gate/stream route is gated by Cognito-token verification (no-op
+# when no pool is configured — local/dev). Resolving the AccessContext here
+# means an unauthenticated request is rejected before any handler runs.
+# /healthz below stays open for load-balancer checks.
+_gated = [Depends(get_access_context)]
 app.include_router(runs.router, dependencies=_gated)
 app.include_router(gates.router, dependencies=_gated)
 app.include_router(stream.router, dependencies=_gated)

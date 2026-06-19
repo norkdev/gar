@@ -28,12 +28,16 @@ class Tool(Protocol):
 class AccessContext:
     """Identity carried with each tool-list request.
 
-    `tenant_id` is recorded on every operation for the audit trail (seam #1)
-    but does NOT affect visibility in v1.
+    Two boundaries (D-202): ``tenant_id`` is the isolation boundary (recorded on
+    every operation, seam #1); ``user_id`` is the idea-privacy boundary (whose
+    private content this is). ``role`` gates tool visibility. Through v2.0 there
+    is one user, so ``user_id`` defaults; v2.1 fills it from the verified token.
+    Owner-scoped data filtering by ``user_id`` lands with sessions (D-204).
     """
 
     tenant_id: str
     role: str = "owner"
+    user_id: str = "local-owner"
 
 
 class ToolRegistry:

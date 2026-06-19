@@ -13,7 +13,8 @@ run to this surface (D-106).
 from __future__ import annotations
 
 import os
-from typing import Any
+import time
+from typing import Any, Protocol
 
 import httpx
 
@@ -44,31 +45,107 @@ class GarApiTimeout(GarApiError):
     polls get_run_status rather than treating it as a failure (D-104)."""
 
 
+class TokenProvider(Protocol):
+    """Supplies a bearer token for the Authorization header."""
+
+    async def token(self) -> str: ...
+    async def aclose(self) -> None: ...
+
+
+class M2MTokenProvider:
+    """OAuth2 client-credentials (M2M) token, cached until shortly before expiry
+    (D-206). The MCP/CLI exchange client_id/secret at the Cognito token endpoint
+    for a short-lived access token the backend verifies like any user token."""
+
+    def __init__(
+        self,
+        *,
+        token_endpoint: str,
+        client_id: str,
+        client_secret: str,
+        scope: str | None = None,
+        transport: httpx.AsyncBaseTransport | None = None,
+    ) -> None:
+        self._endpoint = token_endpoint
+        self._auth = (client_id, client_secret)
+        self._scope = scope
+        self._http = httpx.AsyncClient(
+            transport=transport,
+            timeout=httpx.Timeout(REQUEST_TIMEOUT_SEC, connect=CONNECT_TIMEOUT_SEC),
+        )
+        self._cached: str | None = None
+        self._expires_at = 0.0
+
+    async def token(self) -> str:
+        now = time.monotonic()
+        if self._cached and now < self._expires_at - 30:  # 30s skew margin
+            return self._cached
+        data = {"grant_type": "client_credentials"}
+        if self._scope:
+            data["scope"] = self._scope
+        try:
+            resp = await self._http.post(self._endpoint, auth=self._auth, data=data)
+        except httpx.HTTPError as exc:
+            raise GarApiError(
+                f"Could not reach the token endpoint {self._endpoint}: {exc}"
+            ) from exc
+        if resp.status_code >= 400:
+            raise GarApiError(
+                f"Token endpoint returned {resp.status_code}: {resp.text[:200]}"
+            )
+        body = resp.json()
+        self._cached = body["access_token"]
+        self._expires_at = now + float(body.get("expires_in", 3600))
+        return self._cached
+
+    async def aclose(self) -> None:
+        await self._http.aclose()
+
+
+def _token_provider_from_env() -> M2MTokenProvider | None:
+    endpoint = os.environ.get("GAR_COGNITO_TOKEN_ENDPOINT")
+    client_id = os.environ.get("GAR_COGNITO_CLIENT_ID")
+    client_secret = os.environ.get("GAR_COGNITO_CLIENT_SECRET")
+    if endpoint and client_id and client_secret:
+        return M2MTokenProvider(
+            token_endpoint=endpoint,
+            client_id=client_id,
+            client_secret=client_secret,
+            scope=os.environ.get("GAR_COGNITO_SCOPE"),
+        )
+    return None
+
+
+_USE_ENV = object()
+
+
 class GarApiClient:
     """Async wrapper over the GAR REST API.
 
-    Config resolves from explicit args first, then the environment:
-    ``GAR_API_URL`` (default ``http://localhost:8000``) and ``GAR_API_KEY``
-    (optional; sent in the ``X-GAR-API-Key`` header that the backend gate
-    checks). ``transport`` is injectable so tests drive it with
-    ``httpx.MockTransport`` — no live backend required.
+    Base URL resolves from ``base_url`` then ``GAR_API_URL`` (default
+    ``http://localhost:8000``). Authentication is a Cognito bearer token from a
+    ``TokenProvider``: by default the M2M provider built from the environment
+    (``GAR_COGNITO_TOKEN_ENDPOINT`` / ``_CLIENT_ID`` / ``_CLIENT_SECRET`` /
+    ``_SCOPE``), or None when unset (local backend with auth disabled).
+    ``transport`` / ``token_provider`` are injectable so tests drive both with
+    ``httpx.MockTransport`` / a stub — no live backend or Cognito required.
     """
 
     def __init__(
         self,
         *,
         base_url: str | None = None,
-        api_key: str | None = None,
         transport: httpx.AsyncBaseTransport | None = None,
+        token_provider: TokenProvider | None | object = _USE_ENV,
     ) -> None:
         resolved = base_url or os.environ.get("GAR_API_URL") or DEFAULT_API_URL
         self._base_url = resolved.rstrip("/")
-        key = api_key if api_key is not None else os.environ.get("GAR_API_KEY")
         self._headers = {"X-GAR-Client": "mcp"}
-        if key:
-            # Custom header (not Authorization: Bearer) so per-user OAuth/Cognito
-            # tokens can claim Authorization in a later phase. Matches auth.py.
-            self._headers["X-GAR-API-Key"] = key
+        self._token_provider: TokenProvider | None = (
+            _token_provider_from_env()
+            if token_provider is _USE_ENV
+            else token_provider  # type: ignore[assignment]
+        )
         self._client = httpx.AsyncClient(
             base_url=self._base_url,
             transport=transport,
@@ -77,6 +154,13 @@ class GarApiClient:
 
     async def aclose(self) -> None:
         await self._client.aclose()
+        if self._token_provider is not None:
+            await self._token_provider.aclose()
+
+    async def _auth_headers(self) -> dict[str, str]:
+        if self._token_provider is None:
+            return {}
+        return {"Authorization": f"Bearer {await self._token_provider.token()}"}
 
     async def _request(
         self,
@@ -86,9 +170,10 @@ class GarApiClient:
         json: Any | None = None,
         params: dict[str, Any] | None = None,
     ) -> Any:
+        headers = {**self._headers, **(await self._auth_headers())}
         try:
             resp = await self._client.request(
-                method, path, json=json, params=params, headers=self._headers
+                method, path, json=json, params=params, headers=headers
             )
         except (httpx.ConnectError, httpx.ConnectTimeout) as exc:
             raise GarApiError(

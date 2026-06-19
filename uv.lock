@@ -429,6 +429,7 @@ dependencies = [
     { name = "mangum" },
     { name = "mcp" },
     { name = "pathspec" },
+    { name = "pyjwt", extra = ["crypto"] },
     { name = "python-dotenv" },
     { name = "uvicorn", extra = ["standard"] },
 ]
@@ -450,6 +451,7 @@ requires-dist = [
     { name = "mangum", specifier = ">=0.21.0" },
     { name = "mcp", specifier = ">=1.27.2" },
     { name = "pathspec" },
+    { name = "pyjwt", extras = ["crypto"], specifier = ">=2.10.1" },
     { name = "python-dotenv" },
     { name = "uvicorn", extras = ["standard"] },
 ]

@@ -1,25 +1,28 @@
 """Shared helpers for mcp_server tests.
 
 All offline: the GarApiClient is driven by an httpx.MockTransport, so no live
-backend (and no API key) is needed (plan §2.3).
+backend (and no Cognito) is needed (plan §2.3).
 """
 
 from collections.abc import Callable
 from typing import Any
 
 import httpx
-from gar_backend.mcp_server.client import GarApiClient
+from gar_backend.mcp_server.client import GarApiClient, TokenProvider
 from gar_backend.mcp_server.tools import McpTool, make_tools
 
 Handler = Callable[[httpx.Request], httpx.Response]
 
 
-def make_client(handler: Handler, *, api_key: str | None = None) -> GarApiClient:
-    """A GarApiClient whose requests are answered by ``handler``."""
+def make_client(
+    handler: Handler, *, token_provider: TokenProvider | None = None
+) -> GarApiClient:
+    """A GarApiClient whose requests are answered by ``handler``. No token
+    provider by default → no Authorization header (local / unauth backend)."""
     return GarApiClient(
         base_url="http://test",
-        api_key=api_key,
         transport=httpx.MockTransport(handler),
+        token_provider=token_provider,
     )
 
 
