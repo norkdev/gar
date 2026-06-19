@@ -4,11 +4,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project state
 
-**v1 backend complete + verified end-to-end against live arXiv + Anthropic APIs.** Monorepo as a uv workspace; three siblings:
+**v2.0 deployed to AWS + verified live; backend complete against live arXiv + Anthropic APIs.** Monorepo as a uv workspace; three siblings:
 
-- `backend/` — FastAPI + agent loop + governance + sources/ideas/state/reports + `retrieval/`, plus an MCP server (`mcp_server/`, entry point `gar-mcp`) that exposes the governed gates over stdio as a third client (see `plan.md` / `docs/mcp.md`). Retrieval has a swappable `Reranker` (dependency-free BM25 default; opt-in Voyage embeddings via `GAR_RERANKER=embedding`), embedding **directions clustering** (report positioning map + grouped sources gate), a `recall@K` instrument, and **per-phase model tiers** (Haiku for derive/search, Sonnet for compose; `GAR_MODEL_*` / `GAR_THOROUGH`). 357 unit / integration tests passing. End-to-end smoke produced a complete, cited Markdown report; the grounding-retry path fired and recovered in production (LLM emitted 2 unknown citations on first compose; auto re-prompt produced a clean report on attempt 2).
-- `frontend/` — Vite + React + TypeScript. 5 views (Start / ConceptReview / SourceSelection / FinalReport / Completed) plus a live `Activity` SSE feed. Builds cleanly; browser smoke passed end-to-end (incl. the directions-grouped sources gate).
-- `infra/` — AWS CDK (Python) with five empty stacks (`Data` / `Workflow` / `Backend` / `Frontend` / `Auth`). Synthesizes successfully; no resources defined yet.
+- `backend/` — FastAPI + agent loop + governance + sources/ideas/state/reports + `retrieval/`, plus an MCP server (`mcp_server/`, entry point `gar-mcp`) that exposes the governed gates over stdio as a third client (see `plan.md` / `docs/mcp.md`). Retrieval has a swappable `Reranker` (dependency-free BM25 default; opt-in Voyage embeddings via `GAR_RERANKER=embedding`), embedding **directions clustering** (report positioning map + grouped sources gate), a `recall@K` instrument, and **per-phase model tiers** (Haiku for derive/search, Sonnet for compose; `GAR_MODEL_*` / `GAR_THOROUGH`). **v2.0 cloud seams**: `DynamoDbRunStore` (+ S3 candidate-pool offload), `S3AuditSink`, async self-invoke worker (`api/segments.py`, `main.handler` worker branch), `X-GAR-API-Key` gate (`auth.py`), Secrets Manager key resolution (`secrets.py`), Bedrock provider seam (`GAR_LLM_PROVIDER`). 400+ unit / integration tests passing (moto for AWS). End-to-end smoke produced a complete, cited Markdown report; the grounding-retry path fired and recovered in production.
+- `frontend/` — Vite + React + TypeScript. 5 views (Start / ConceptReview / SourceSelection / FinalReport / Completed) + a `Processing` view that **polls** `GET /runs/{id}` (the SSE Activity feed was retired — it can't work behind the Function URL). Base-URL + `X-GAR-API-Key` via `VITE_GAR_API_URL` / `VITE_GAR_API_KEY`. Builds cleanly. **Public hosting deferred to v2.1 with Cognito** (plan.md D-205).
+- `infra/` — AWS CDK (Python). `DataStack` (DynamoDB `gar-runs` + state S3 bucket) and `BackendStack` (Lambda arm64 + Function URL `NONE` + CORS, async self-invoke IAM, two Secrets Manager secrets) are **deployed** in `ap-northeast-1` (account `733287383921`). `Workflow` / `Frontend` / `Auth` stacks still scaffolds. Deploy creds: `deploy` profile (short-lived; `eval "$(aws configure export-credentials --profile deploy --format env)"` before `cdk`).
 
 Public-facing design narrative lives in `README.md`; design constraints / non-negotiables in `spec.md`.
 
@@ -53,7 +53,7 @@ uv sync --all-packages              # install all Python workspace deps
 
 ```bash
 # Backend
-uv run --package gar-backend pytest backend/tests/                   # 357 tests
+uv run --package gar-backend pytest backend/tests/                   # 403 tests
 uv run --package gar-backend uvicorn gar_backend.main:app --reload   # dev server
 # → http://localhost:8000/healthz; OpenAPI at /docs
 

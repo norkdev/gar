@@ -14,7 +14,7 @@ from pathlib import Path
 from anthropic import AsyncAnthropic
 from fastapi import Depends, Request
 
-from gar_backend.agent.llm import AnthropicLLM, LLMClient
+from gar_backend.agent.llm import AnthropicLLM, BedrockLLM, LLMClient
 from gar_backend.governance.audit import (
     KNOWN_CLIENTS,
     AuditLogger,
@@ -105,17 +105,25 @@ def get_request_audit_logger(
     return base.for_client(client_from_request(request))
 
 
+def make_llm_client() -> LLMClient:
+    """Select the LLM provider (spec seam #5). ``GAR_LLM_PROVIDER=bedrock``
+    picks the Bedrock seam (stub today); anything else is Anthropic, with the
+    key resolved from env or Secrets Manager."""
+    if os.environ.get("GAR_LLM_PROVIDER", "anthropic").lower() == "bedrock":
+        return BedrockLLM()
+    key = resolve_anthropic_api_key()
+    inner = AsyncAnthropic(api_key=key) if key else AsyncAnthropic()
+    return AnthropicLLM(inner)
+
+
 def get_llm_client() -> LLMClient:
     """Process-wide singleton LLM client.
 
-    The API key is resolved once here (env locally, Secrets Manager on Lambda).
-    Resolving at the singleton — not per request — means the secret is fetched
-    once per cold start, not on every run."""
+    Resolved once here, not per request, so the secret is fetched once per cold
+    start rather than on every run."""
     global _llm_client
     if _llm_client is None:
-        key = resolve_anthropic_api_key()
-        inner = AsyncAnthropic(api_key=key) if key else AsyncAnthropic()
-        _llm_client = AnthropicLLM(inner)
+        _llm_client = make_llm_client()
     return _llm_client
 
 

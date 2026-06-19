@@ -299,6 +299,46 @@ migration is that the frontend and the MCP server run with a base-URL swap.
   local / AWS). Update the "AWS infra: scaffolded" wording to match reality.
 - `v2.0.0` tag.
 
+### 3.4 v2.0 status — shipped 2026-06-19
+
+Deployed to account `733287383921`, region `ap-northeast-1`, and verified live
+end-to-end (survey driven through the MCP client + SigV4 HTTP). Slices, each
+deployed and checked before the next:
+
+1. `DynamoDbRunStore` (run_id PK + `tenant-index` GSI) + **S3 candidate-pool
+   offload** (400 KB item-limit dodge) — done.
+2. **Lambda** via Mangum behind a **Function URL** (not API Gateway — Function
+   URL is simpler and sufficient for one app), arm64, Docker-bundled — done.
+3. **Async self-invoke worker** (`InvocationType=Event`); endpoints schedule +
+   return a snapshot; clients poll. Keyed on `AWS_LAMBDA_FUNCTION_NAME` to
+   avoid a CDK self-reference cycle. Web UI switched SSE → polling — done.
+   *(Bug found + fixed live: the worker's `asyncio.run` poisoned Mangum's
+   reused event loop → 502; isolated it on its own thread.)*
+4. **S3 audit sink** — one immutable object per record (a single per-run object
+   would be overwritten across the multi-invocation HITL split) — done.
+5. **Bedrock seam** — `BedrockLLM` stub + `GAR_LLM_PROVIDER` selector — done.
+6. **Auth** — real `X-GAR-API-Key` gate; Function URL flipped to `NONE` + CORS;
+   app key + Anthropic key both in **Secrets Manager** — done.
+7. **CDK** — `DataStack` + `BackendStack` define real resources; `cdk synth`
+   green — done. (FrontendStack/AuthStack still scaffolds — see D-205.)
+8. Notes: AWS backend is content-upload only (vault_path is local-only). — done.
+
+### D-205: defer public browser hosting to v2.1 (with Cognito)
+
+The frontend was made cloud-capable (polling + `X-GAR-API-Key` + base-URL
+config), but **hosting it publicly is deferred to v2.1**, paired with Cognito.
+
+**Why:** a hosted SPA against the public Function URL would need its auth in
+the browser. The only v2.0-shippable options are a shared key baked into the JS
+bundle (visible to anyone → effectively public) or a CloudFront proxy injecting
+the key as an origin header (key stays server-side, but the key becomes an
+operator-supplied deploy input and the injection layer is replaced once Cognito
+lands). Both are throwaway or weak relative to the real answer — a per-user
+token in `Authorization` (the header slice 4 deliberately kept free). The cloud
+is already provably governed through the **MCP path**, so a public browser adds
+hosting, not architecture. FrontendStack (S3 + CloudFront) therefore pairs
+naturally with Cognito in v2.1, where the browser gets auth it deserves.
+
 ---
 
 ## 4. Notes on how to proceed (for Claude Code sessions)

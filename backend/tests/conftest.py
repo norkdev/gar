@@ -34,5 +34,6 @@ def _hermetic_reranker_env(monkeypatch: pytest.MonkeyPatch) -> None:
         "AWS_LAMBDA_FUNCTION_NAME",
         "GAR_API_KEY",
         "GAR_API_KEY_SECRET_ARN",
+        "GAR_LLM_PROVIDER",
     ):
         monkeypatch.delenv(var, raising=False)

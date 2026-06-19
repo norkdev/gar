@@ -1,8 +1,11 @@
 """LLM client abstraction. Anthropic ↔ Bedrock swap point (spec §10 seam #5).
 
 The agent loop talks to `LLMClient` — a Protocol with one `complete()` method.
-v1 ships AnthropicLLM backed by anthropic.AsyncAnthropic. Future: a Bedrock
-implementation of the same Protocol so the swap is one constructor line.
+The active implementation is AnthropicLLM (anthropic.AsyncAnthropic). BedrockLLM
+is the seam's other end: a same-Protocol stub so the swap is one config flip
+(`GAR_LLM_PROVIDER=bedrock`, resolved in api/deps.make_llm_client) plus filling
+in its `complete()`. Per spec §11 the Bedrock path is Future Work — the
+interface and config slot exist; the implementation does not.
 
 v1 does not stream. SSE wiring (agent step events → frontend) will be added
 when the agent loop is implemented.
@@ -117,6 +120,33 @@ class AnthropicLLM:
         except anthropic.RateLimitError as exc:
             raise RateLimitError(str(exc), retry_after=_parse_retry_after(exc)) from exc
         return _parse_response(response)
+
+
+class BedrockLLM:
+    """LLMClient seam for Amazon Bedrock — interface present, impl deferred.
+
+    Selected by ``GAR_LLM_PROVIDER=bedrock``. v2.x ships the config slot and the
+    Protocol-conforming shape (so swapping providers is localized to deps), but
+    not the call itself. A real implementation would invoke the Bedrock
+    ``anthropic.AnthropicBedrock`` async client (same Messages shape as
+    AnthropicLLM above, different auth/endpoint) and translate Bedrock's
+    throttling exception into ``RateLimitError`` so the agent loop's retry path
+    is provider-agnostic.
+    """
+
+    async def complete(
+        self,
+        *,
+        system: str,
+        messages: list[Message],
+        tools: list[ToolDefinition],
+        model: str,
+        max_tokens: int = 4096,
+    ) -> LLMResponse:
+        raise NotImplementedError(
+            "Bedrock provider is a v2.x seam; not implemented. "
+            "Unset GAR_LLM_PROVIDER (or set it to 'anthropic')."
+        )
 
 
 def _parse_retry_after(exc: anthropic.RateLimitError) -> float | None:
