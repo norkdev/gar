@@ -17,7 +17,7 @@ from gar_backend.governance.audit import KNOWN_CLIENTS, AuditLogger, FileAuditSi
 from gar_backend.governance.rbac import AccessContext
 from gar_backend.sources.arxiv import ArxivSource
 from gar_backend.sources.base import PublicSource
-from gar_backend.state.runs import InMemoryRunStore, RunStore
+from gar_backend.state.runs import RunStore, make_run_store
 
 DEFAULT_AUDIT_LOG_PATH = Path("audit.jsonl")
 
@@ -36,7 +36,7 @@ _public_source: PublicSource | None = None
 def get_run_store() -> RunStore:
     global _run_store
     if _run_store is None:
-        _run_store = InMemoryRunStore()
+        _run_store = make_run_store()
     return _run_store
 
 

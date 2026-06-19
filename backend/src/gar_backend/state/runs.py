@@ -193,3 +193,15 @@ class DynamoDbRunStore:
             error=body.get("error"),
             updated_at=datetime.fromisoformat(item["updated_at"]),
         )
+
+
+def make_run_store() -> RunStore:
+    """Select the RunStore from the environment.
+
+    ``GAR_RUNS_TABLE`` set (the AWS deployment) → ``DynamoDbRunStore``, which also
+    offloads the candidate pool to ``GAR_STATE_BUCKET`` when that is set; otherwise
+    the in-memory store (local dev / tests). This is the single place the
+    persistence backend is chosen (spec §10 seam #3)."""
+    if os.environ.get("GAR_RUNS_TABLE"):
+        return DynamoDbRunStore()
+    return InMemoryRunStore()
