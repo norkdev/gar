@@ -207,10 +207,83 @@ to understand what the agent actually did on a given run reads
   Voyage is therefore an optional fourth external dependency, used only
   when semantic reranking is enabled.
 
-The intended deployment target is AWS (Lambda + Function URLs + Step
-Functions + DynamoDB + S3 + Cognito + KMS) — see `infra/`. Resources are
-stubs at the moment, but the seven scale seams listed below are in the
-v1 code already.
+The deployment target is AWS — **v2.0 lifts this same backend to the cloud**
+(next section). The seven scale seams listed further below were in the v1
+code from the start, which is what made the lift localized rather than a
+rewrite.
+
+---
+
+## Architecture (v2.0) — the AWS deployment
+
+v2.0 runs the **identical** `gar_backend.main:app` on AWS. Nothing about the
+agent loop, the gates, or the governance layer changed; what changed is where
+state lives and how the process is invoked. The lift was deliberately staged
+as small, independently deployable slices (see `plan.md` §3), each verified
+live before the next.
+
+```
+                         ┌──────────────── AWS · ap-northeast-1 ────────────────┐
+ MCP client ─┐           │                                                      │
+ (X-GAR-     │  HTTPS    │   Lambda Function URL (auth NONE, CORS)              │
+  API-Key)   ├─────────► │     │  X-GAR-API-Key gate (auth.require_api_key)     │
+ Browser /   │           │     ▼                                                │
+ signed CLI ─┘           │   Lambda  ── Mangum ──►  FastAPI (the v1 app)        │
+                         │     │  ▲                   │                          │
+                         │     │  └── self-invoke ────┘  (InvocationType=Event)  │
+                         │     │      async worker: one segment to the next gate │
+                         │     ▼                                                  │
+                         │   DynamoDB   S3 (state pool + audit JSONL)   Secrets  │
+                         │   (RunStore)                                  Manager │
+                         │                              │                  │      │
+                         └──────────────────────────────┼──────────────────┼─────┘
+                                                         ▼                  ▼
+                                                   Anthropic API       (API key +
+                                                   (Haiku + Sonnet)     app key)
+```
+
+- **Compute** — the FastAPI app is packaged with Docker (arm64/Graviton) and
+  served on Lambda via **Mangum**; `boto3` is dropped from the bundle (the
+  runtime provides it). A **Function URL** is the entry point.
+- **State** — `RunStore` swaps its in-memory map for **DynamoDB** (one item
+  per run, a `tenant-index` GSI for listing). The sources gate's large
+  candidate pool would blow DynamoDB's 400 KB item limit, so it is offloaded
+  to **S3** and rehydrated on read. The **audit log** becomes a durable S3
+  sink — one immutable object per record, because a run is split across
+  multiple Lambda invocations and a single per-run object would be overwritten.
+- **Async execution** — a survey segment (derive / search / compose) runs for
+  minutes, far past the 30 s Function URL timeout. So the request **schedules**
+  the segment and returns immediately; the Lambda **self-invokes
+  asynchronously** to run it under the full 15-minute budget, and the client
+  polls `GET /runs/{id}`. This is the durable-HITL seam realized: each gate
+  ends one invocation, approval starts the next. Step Functions orchestration
+  is the planned v2.2 evolution of this same seam.
+- **Secrets** — the Anthropic key and the app API key live in **Secrets
+  Manager**, fetched once per cold start; neither is ever in the image, an env
+  var, or git.
+- **Auth** — the Function URL is `NONE` (no SigV4) but gated by a shared
+  **`X-GAR-API-Key`** the MCP server and browser send over plain HTTP.
+  `Authorization` is deliberately left free for per-user **Cognito** tokens in
+  v2.1.
+
+The governance pillars carry over unchanged in intent: **grounding** is the
+same compose-time check; **HITL** gates are now durable across invocations in
+DynamoDB; the **audit log** is the same schema (`schema_version`) written to
+S3; **role-based access** still hides private-idea tools. The boundary
+**auth check** (seam #7) graduated from a stub to a real key gate.
+
+**Scope of v2.0:** single-tenant lift. Per-user **identity (Cognito)**,
+**sessions** (a persistent product surface), and **hosting the browser**
+publicly are v2.1 — the browser would otherwise need a weak shared-key-in-JS,
+so it waits for real per-user auth (the deliberate Option-C call; see
+`plan.md` §10). **Step Functions** orchestration and **per-tenant CMK** are
+v2.2. The **Bedrock** LLM is a wired seam (`GAR_LLM_PROVIDER`), not an
+implementation.
+
+Verified end-to-end against the live deployment: a governed survey driven
+through the **MCP client** (and via SigV4-signed HTTP before the key gate
+landed) reaches the concept gate with the secret resolving, state in DynamoDB,
+and audit records in S3.
 
 ---
 
