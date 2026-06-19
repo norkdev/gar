@@ -38,9 +38,9 @@ inside.
 > turns the candidate pool into a positioning map. **Per-phase model
 > tiers** (Haiku for the cheap, high-volume phases; Sonnet for the report)
 > cut cost. A third client — an MCP server (`gar-mcp`) exposing the
-> governed gates over stdio — ships alongside the CLI and Web UI. **v2.0**
+> governed gates over stdio — ships alongside the CLI and Web UI. **v2.x**
 > lifts the same backend to AWS (Lambda + DynamoDB + S3 + Secrets Manager,
-> async self-invoke worker, API-key gate), deployed and verified live;
+> async self-invoke worker, Cognito auth), deployed and verified live;
 > per-user identity and browser hosting are v2.1.
 
 ---
@@ -229,22 +229,22 @@ live before the next.
 
 ```
                          ┌──────────────── AWS · ap-northeast-1 ────────────────┐
- MCP client ─┐           │                                                      │
- (X-GAR-     │  HTTPS    │   Lambda Function URL (auth NONE, CORS)              │
-  API-Key)   ├─────────► │     │  X-GAR-API-Key gate (auth.require_api_key)     │
- Browser /   │           │     ▼                                                │
- signed CLI ─┘           │   Lambda  ── Mangum ──►  FastAPI (the v1 app)        │
+ MCP / CLI ──┐           │                                                      │
+ (Bearer JWT)│  HTTPS    │   Lambda Function URL (auth NONE, CORS)              │
+             ├─────────► │     │  Cognito JWT gate (api/auth verifies)         │
+ Cognito ◄───┘           │     ▼                                                │
+ (M2M token)             │   Lambda  ── Mangum ──►  FastAPI (the v1 app)        │
                          │     │  ▲                   │                          │
                          │     │  └── self-invoke ────┘  (InvocationType=Event)  │
                          │     │      async worker: one segment to the next gate │
                          │     ▼                                                  │
-                         │   DynamoDB   S3 (state pool + audit JSONL)   Secrets  │
-                         │   (RunStore)                                  Manager │
-                         │                              │                  │      │
-                         └──────────────────────────────┼──────────────────┼─────┘
-                                                         ▼                  ▼
-                                                   Anthropic API       (API key +
-                                                   (Haiku + Sonnet)     app key)
+                         │  DynamoDB  S3 (pool + audit)  Cognito   Secrets Mgr   │
+                         │  (RunStore)                   (pool)    (Anthropic)   │
+                         │                              │                   │     │
+                         └──────────────────────────────┼───────────────────┼────┘
+                                                         ▼                   ▼
+                                                   Anthropic API        (Anthropic
+                                                   (Haiku + Sonnet)      key)
 ```
 
 - **Compute** — the FastAPI app is packaged with Docker (arm64/Graviton) and
@@ -263,19 +263,20 @@ live before the next.
   polls `GET /runs/{id}`. This is the durable-HITL seam realized: each gate
   ends one invocation, approval starts the next. Step Functions orchestration
   is the planned v2.2 evolution of this same seam.
-- **Secrets** — the Anthropic key and the app API key live in **Secrets
-  Manager**, fetched once per cold start; neither is ever in the image, an env
-  var, or git.
-- **Auth** — the Function URL is `NONE` (no SigV4) but gated by a shared
-  **`X-GAR-API-Key`** the MCP server and browser send over plain HTTP.
-  `Authorization` is deliberately left free for per-user **Cognito** tokens in
-  v2.1.
+- **Secrets** — the Anthropic key lives in **Secrets Manager**, fetched once
+  per cold start; never in the image, an env var, or git.
+- **Auth** — the Function URL is `NONE` (no SigV4) but gated in-app by **Cognito
+  JWT verification** (`api/auth`). One path for everyone: machine clients
+  (MCP/CLI) use the OAuth2 client-credentials (M2M) grant; browser users (later
+  slice) sign in. Both send `Authorization: Bearer <token>` over plain HTTP.
+  (v2.0 shipped a shared `X-GAR-API-Key` gate as the interim; v2.1 replaced it —
+  D-206.)
 
 The governance pillars carry over unchanged in intent: **grounding** is the
 same compose-time check; **HITL** gates are now durable across invocations in
 DynamoDB; the **audit log** is the same schema (`schema_version`) written to
 S3; **role-based access** still hides private-idea tools. The boundary
-**auth check** (seam #7) graduated from a stub to a real key gate.
+**auth check** (seam #7) graduated from a stub to Cognito JWT verification.
 
 **Scope of v2.0:** single-tenant lift. Per-user **identity (Cognito)**,
 **sessions** (a persistent product surface), and **hosting the browser**
@@ -561,13 +562,13 @@ deploy / re-deploy / destroy runbook. In short, from `infra/` with `deploy`
 credentials exported and Docker running:
 
 ```bash
-cdk deploy GarDataStack GarBackendStack --require-approval never
+cdk deploy GarDataStack GarAuthStack GarBackendStack --require-approval never
 ```
 
-then set the Anthropic key into its Secrets Manager secret and point clients
-(MCP server: `GAR_API_URL` + `GAR_API_KEY`) at the Function URL. The DynamoDB
-table, S3 (state pool + audit log), Lambda, Secrets Manager, and the
-`X-GAR-API-Key` gate come up as one stack pair.
+then set the Anthropic key into its Secrets Manager secret and point the MCP
+server at the Function URL with its Cognito M2M credentials
+(`GAR_API_URL` + `GAR_COGNITO_*`). DynamoDB, S3 (state pool + audit log), the
+Cognito pool, Lambda, and the JWT gate come up across the three stacks.
 
 ### CLI — local-mode shortcut
 
@@ -605,9 +606,10 @@ GAR_API_URL=http://localhost:8000 uv run --package gar-backend gar-mcp
 ```
 
 Configuration is by environment: `GAR_API_URL` (default
-`http://localhost:8000`), `GAR_API_KEY` (app key, sent as `X-GAR-API-Key`;
-required for the cloud backend, optional locally), `GAR_MCP_ROLE` (`public` by
-default). For the client config, copy
+`http://localhost:8000`), `GAR_MCP_ROLE` (`public` by default), and — for the
+cloud backend — the Cognito M2M variables (`GAR_COGNITO_TOKEN_ENDPOINT` /
+`_CLIENT_ID` / `_CLIENT_SECRET` / `_SCOPE`), unneeded locally. For the client
+config, copy
 `.mcp.json.example` (Claude Code) or run
 `./scripts/print-mcp-config.sh claude-desktop` to get a paste-ready block
 with the absolute path filled in. See [`docs/mcp.md`](docs/mcp.md) for
@@ -649,7 +651,7 @@ a real API key or live AWS.
 ```
 backend/src/gar_backend/
 ├── main.py             FastAPI app + Mangum handler (HTTP + async worker event)
-├── secrets.py          resolve Anthropic / app keys (env or Secrets Manager)
+├── secrets.py          resolve the Anthropic key (env or Secrets Manager)
 ├── api/                HTTP layer
 │   ├── runs.py         POST /runs, GET /runs, GET /runs/{id}
 │   ├── gates.py        POST /runs/{id}/gates/{concept,sources,report}
@@ -657,7 +659,7 @@ backend/src/gar_backend/
 │   ├── segments.py     run a segment off the request (in-process / Lambda self-invoke)
 │   ├── agent_wiring.py build AgentContext from a request or a stored run
 │   ├── deps.py         DI providers (singletons; overridden in tests)
-│   └── auth.py         X-GAR-API-Key gate (disabled when no key configured)
+│   └── auth.py         Cognito JWT gate (disabled when no pool configured)
 ├── agent/
 │   ├── loop.py         orchestrator + 3 phase functions
 │   ├── prompts.py      system prompts per phase
@@ -685,7 +687,7 @@ backend/src/gar_backend/
 └── mcp_server/         FastMCP gates over stdio — thin REST client
     ├── server.py       entry point (gar-mcp)
     ├── tools.py        gate tools + dispatch
-    ├── client.py       httpx wrapper (X-GAR-Client + X-GAR-API-Key)
+    ├── client.py       httpx wrapper (X-GAR-Client + Cognito M2M bearer)
     └── models.py       Pydantic I/O shared with the API
 
 frontend/src/
@@ -697,8 +699,8 @@ frontend/src/
 └── views/              Start / ConceptReview / SourceSelection /
                         FinalReport / Completed / Processing (polling)
 
-infra/                  AWS CDK (Python) — Data + Backend deployed; Workflow /
-                        Frontend / Auth scaffolds (see docs/deploy.md)
+infra/                  AWS CDK (Python) — Data + Auth + Backend deployed;
+                        Workflow / Frontend scaffolds (see docs/deploy.md)
 backend/tests/          403 tests, mirrors src/ layout
 spec.md                 Working spec (Japanese)
 CLAUDE.md               Notes for Claude Code working in this repo

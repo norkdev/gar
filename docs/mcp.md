@@ -102,21 +102,28 @@ All by environment variable:
 | Variable | Default | Meaning |
 |---|---|---|
 | `GAR_API_URL` | `http://localhost:8000` | GAR backend REST base URL |
-| `GAR_API_KEY` | _(unset)_ | App API key, sent as the `X-GAR-API-Key` header |
 | `GAR_MCP_ROLE` | `public` | `public` \| `owner`; selects which tools appear |
+| `GAR_COGNITO_TOKEN_ENDPOINT` | _(unset)_ | Cognito OAuth token endpoint (cloud auth) |
+| `GAR_COGNITO_CLIENT_ID` | _(unset)_ | M2M app-client id |
+| `GAR_COGNITO_CLIENT_SECRET` | _(unset)_ | M2M app-client secret |
+| `GAR_COGNITO_SCOPE` | _(unset)_ | API scope, e.g. `gar-api/access` |
 
-`gar-mcp` is a thin client of the REST API — **the backend must be
-running**, locally or in AWS (v2.0). To drive the **cloud** backend, point it
-at the deployed Function URL and supply the app key:
+`gar-mcp` is a thin client of the REST API — **the backend must be running**,
+locally or in AWS. To drive the **cloud** backend, point it at the Function URL
+and supply the Cognito M2M credentials; the client fetches a short-lived bearer
+token (client-credentials) and sends it as `Authorization: Bearer`:
 
 ```
-GAR_API_URL=<ApiFunctionUrl>        # from the deploy outputs
-GAR_API_KEY=<app key>               # the AppApiKey secret value
+GAR_API_URL=<ApiFunctionUrl>                 # from the deploy outputs
+GAR_COGNITO_TOKEN_ENDPOINT=<TokenEndpoint>   # AuthStack output
+GAR_COGNITO_CLIENT_ID=<M2mClientId>          # AuthStack output
+GAR_COGNITO_CLIENT_SECRET=<m2m secret>       # fetched via describe-user-pool-client
+GAR_COGNITO_SCOPE=gar-api/access             # AuthStack ApiScope output
 ```
 
-The cloud Function URL enforces the key (`X-GAR-API-Key`); a local backend with
-no key configured ignores it. See `docs/deploy.md` for fetching the URL + key.
-Switching between local and cloud is just these two variables.
+A local backend with no pool configured needs none of these (auth disabled).
+See `docs/deploy.md` for fetching the endpoint + client id/secret. Switching
+between local and cloud is just these variables.
 
 ## Claude Code
 
