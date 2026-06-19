@@ -18,6 +18,7 @@ browser/MCP clients lands in a later slice.
 import os
 
 from aws_cdk import (
+    ArnFormat,
     BundlingOptions,
     CfnOutput,
     Duration,
@@ -25,6 +26,9 @@ from aws_cdk import (
 )
 from aws_cdk import (
     aws_dynamodb as dynamodb,
+)
+from aws_cdk import (
+    aws_iam as iam,
 )
 from aws_cdk import (
     aws_lambda as lambda_,
@@ -98,6 +102,25 @@ class BackendStack(Stack):
         runs_table.grant_read_write_data(fn)  # table + its GSIs
         state_bucket.grant_read_write(fn)  # run-state pool + audit log
         api_key_secret.grant_read(fn)
+
+        # Allow the function to invoke itself asynchronously to run a segment
+        # off the request thread (api/segments.LambdaRunner). Scoped to this
+        # stack's functions by name pattern rather than fn.function_arn — the
+        # latter would make the role depend on the function it's attached to,
+        # a CloudFormation circular dependency.
+        fn.add_to_role_policy(
+            iam.PolicyStatement(
+                actions=["lambda:InvokeFunction"],
+                resources=[
+                    self.format_arn(
+                        service="lambda",
+                        resource="function",
+                        resource_name=f"{self.stack_name}-*",
+                        arn_format=ArnFormat.COLON_RESOURCE_NAME,
+                    )
+                ],
+            )
+        )
 
         url = fn.add_function_url(auth_type=lambda_.FunctionUrlAuthType.AWS_IAM)
         self.api_function = fn

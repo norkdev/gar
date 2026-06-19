@@ -13,6 +13,7 @@ from gar_backend.api.deps import (
     get_llm_client,
     get_run_store,
 )
+from gar_backend.api.segments import InlineRunner, get_segment_runner
 from gar_backend.governance.audit import AuditLogger, FileAuditSink
 from gar_backend.governance.rbac import AccessContext
 from gar_backend.main import app
@@ -74,6 +75,9 @@ def api_setup(tmp_path: Path) -> Any:
     app.dependency_overrides[get_audit_log_path] = lambda: audit_path
     app.dependency_overrides[get_llm_client] = lambda: llm
     app.dependency_overrides[get_access_context] = lambda: access
+    # Run segments inline so endpoint tests see the gate state synchronously;
+    # the async runners have their own dedicated tests.
+    app.dependency_overrides[get_segment_runner] = lambda: InlineRunner()
 
     client = TestClient(app)
     try:

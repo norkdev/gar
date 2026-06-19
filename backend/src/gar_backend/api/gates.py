@@ -19,19 +19,17 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
 from gar_backend.agent.llm import LLMClient
-from gar_backend.agent.loop import run_until_gate
+from gar_backend.api.agent_wiring import build_agent_context, ideas_source_for_state
 from gar_backend.api.deps import (
     get_access_context,
+    get_client,
     get_llm_client,
     get_public_source,
     get_request_audit_logger,
     get_run_store,
 )
-from gar_backend.api.runs import (
-    build_agent_context,
-    ideas_source_for_state,
-    serialize_state,
-)
+from gar_backend.api.runs import serialize_state
+from gar_backend.api.segments import SegmentRunner, get_segment_runner
 from gar_backend.governance.audit import AuditLogger
 from gar_backend.governance.hitl import (
     InvalidTransition,
@@ -63,6 +61,8 @@ async def _resume(
     llm: LLMClient,
     access: AccessContext,
     public_source: PublicSource,
+    runner: SegmentRunner,
+    client: str | None,
 ) -> dict[str, Any]:
     state = await store.get(run_id)
     if state is None:
@@ -75,8 +75,10 @@ async def _resume(
         access=access,
         public_source=public_source,
     )
-    final = await run_until_gate(run_id=run_id, ctx=ctx)
-    return serialize_state(final)
+    # Schedule the next segment off the request; the client polls for the gate.
+    await runner.schedule(run_id, ctx=ctx, client=client)
+    latest = await store.get(run_id)
+    return serialize_state(latest or state)
 
 
 @router.post("/concept")
@@ -88,6 +90,8 @@ async def approve_concept_endpoint(
     llm: LLMClient = Depends(get_llm_client),
     access: AccessContext = Depends(get_access_context),
     public_source: PublicSource = Depends(get_public_source),
+    runner: SegmentRunner = Depends(get_segment_runner),
+    client: str | None = Depends(get_client),
 ) -> dict[str, Any]:
     state = await store.get(run_id)
     if state is None:
@@ -104,6 +108,8 @@ async def approve_concept_endpoint(
         llm=llm,
         access=access,
         public_source=public_source,
+        runner=runner,
+        client=client,
     )
 
 
@@ -116,6 +122,8 @@ async def select_sources_endpoint(
     llm: LLMClient = Depends(get_llm_client),
     access: AccessContext = Depends(get_access_context),
     public_source: PublicSource = Depends(get_public_source),
+    runner: SegmentRunner = Depends(get_segment_runner),
+    client: str | None = Depends(get_client),
 ) -> dict[str, Any]:
     state = await store.get(run_id)
     if state is None:
@@ -132,6 +140,8 @@ async def select_sources_endpoint(
         llm=llm,
         access=access,
         public_source=public_source,
+        runner=runner,
+        client=client,
     )
 
 

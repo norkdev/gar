@@ -15,20 +15,20 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, model_validator
 
 from gar_backend.agent.llm import LLMClient
-from gar_backend.agent.loop import AgentContext, create_run, run_until_gate
-from gar_backend.agent.tools import register_default_tools
+from gar_backend.agent.loop import create_run
+from gar_backend.api.agent_wiring import build_agent_context, ideas_source_for_state
 from gar_backend.api.deps import (
     get_access_context,
+    get_client,
     get_llm_client,
     get_public_source,
     get_request_audit_logger,
     get_run_store,
 )
+from gar_backend.api.segments import SegmentRunner, get_segment_runner
 from gar_backend.governance.audit import AuditLogger
 from gar_backend.governance.hitl import RunState
-from gar_backend.governance.rbac import AccessContext, ToolRegistry
-from gar_backend.ideas.reader import IdeaDocument
-from gar_backend.ideas.search import IdeasSource, InMemoryIdeasSource
+from gar_backend.governance.rbac import AccessContext
 from gar_backend.sources.base import PublicSource
 from gar_backend.state.runs import RunStore
 
@@ -74,52 +74,6 @@ def serialize_state(state: RunState) -> dict[str, Any]:
     }
 
 
-def build_agent_context(
-    *,
-    ideas: IdeasSource | InMemoryIdeasSource,
-    store: RunStore,
-    audit: AuditLogger,
-    llm: LLMClient,
-    access: AccessContext,
-    public_source: PublicSource,
-) -> AgentContext:
-    """Wire AgentContext for a given run. Public so api/gates.py can reuse.
-
-    ``public_source`` is injected (not created here) so a single
-    process-wide instance can enforce its provider's rate-limit policy
-    across all requests. ``ideas`` is per-run because it carries either
-    the vault path or the uploaded content.
-    """
-    registry = ToolRegistry()
-    register_default_tools(
-        registry,
-        public_source=public_source,
-        ideas=ideas,
-    )
-    return AgentContext(
-        llm=llm,
-        registry=registry,
-        audit=audit,
-        store=store,
-        access=access,
-    )
-
-
-def ideas_source_for_state(state: RunState) -> IdeasSource | InMemoryIdeasSource:
-    """Re-construct the right ideas source from a stored state's context.
-
-    Used both at run start and on each gate resume so the agent loop has
-    the same data view across requests.
-    """
-    if "notes_content" in state.context:
-        documents = [
-            IdeaDocument(path=Path(item["path"]), content=item["content"])
-            for item in state.context["notes_content"]
-        ]
-        return InMemoryIdeasSource(documents)
-    return IdeasSource(Path(state.context["vault_path"]))
-
-
 @router.post("")
 async def create_run_endpoint(
     req: CreateRunRequest,
@@ -128,6 +82,8 @@ async def create_run_endpoint(
     llm: LLMClient = Depends(get_llm_client),
     access: AccessContext = Depends(get_access_context),
     public_source: PublicSource = Depends(get_public_source),
+    runner: SegmentRunner = Depends(get_segment_runner),
+    client: str | None = Depends(get_client),
 ) -> dict[str, Any]:
     run_id = str(uuid.uuid4())
 
@@ -160,8 +116,11 @@ async def create_run_endpoint(
         access=access,
         public_source=public_source,
     )
-    final_state = await run_until_gate(run_id=run_id, ctx=ctx)
-    return serialize_state(final_state)
+    # The segment runs off the request: schedule it, then return the latest
+    # snapshot. The client polls GET /runs/{id} until a gate or terminal state.
+    await runner.schedule(run_id, ctx=ctx, client=client)
+    latest = await store.get(run_id)
+    return serialize_state(latest or state)
 
 
 @router.get("/{run_id}")
