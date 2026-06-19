@@ -12,11 +12,11 @@ API key is not baked into the image or an env var — the function reads it at
 cold start from a Secrets Manager secret (`GAR_ANTHROPIC_SECRET_ARN`); the
 real value is set out-of-band (see README), never committed.
 
-The Function URL is auth_type NONE — publicly reachable but gated by a shared
-app API key (`GAR_API_KEY_SECRET_ARN`, also a generated Secrets Manager
-secret) that clients send in the X-GAR-API-Key header. This lets the MCP server
-and browser reach it over plain HTTP without SigV4. Per-user identity (Cognito)
-is a later phase.
+The Function URL is auth_type NONE — publicly reachable but gated in-app by
+Cognito JWT verification. The AuthStack's issuer / M2M client id / API scope are
+passed in as `GAR_COGNITO_*` env; clients (MCP/CLI via M2M, browser later) send
+`Authorization: Bearer <token>` over plain HTTP (no SigV4). This replaces the
+v2.0 shared-API-key gate.
 """
 
 import os
@@ -56,6 +56,9 @@ class BackendStack(Stack):
         *,
         runs_table: dynamodb.ITable,
         state_bucket: s3.IBucket,
+        cognito_issuer: str,
+        cognito_client_id: str,
+        cognito_scope: str,
         **kwargs: object,
     ) -> None:
         super().__init__(scope, construct_id, **kwargs)
@@ -67,19 +70,6 @@ class BackendStack(Stack):
             self,
             "AnthropicApiKey",
             description="Anthropic API key for the GAR backend (set post-deploy)",
-        )
-
-        # Shared API key gating the Function URL. CDK generates a random value
-        # (a real credential, but never in source or the template); the operator
-        # reads it once to configure the MCP server + frontend.
-        app_api_key_secret = secretsmanager.Secret(
-            self,
-            "AppApiKey",
-            description="Shared API key gating the GAR Function URL",
-            generate_secret_string=secretsmanager.SecretStringGenerator(
-                exclude_punctuation=True,
-                password_length=40,
-            ),
         )
 
         fn = lambda_.Function(
@@ -96,7 +86,10 @@ class BackendStack(Stack):
                 "GAR_AUDIT_BUCKET": state_bucket.bucket_name,  # durable audit log
                 "GAR_AUDIT_LOG_PATH": "/tmp/audit.jsonl",  # file-sink fallback
                 "GAR_ANTHROPIC_SECRET_ARN": anthropic_secret.secret_arn,
-                "GAR_API_KEY_SECRET_ARN": app_api_key_secret.secret_arn,
+                # Cognito JWT gate (api/auth): verify tokens from this pool/client.
+                "GAR_COGNITO_ISSUER": cognito_issuer,
+                "GAR_COGNITO_CLIENT_IDS": cognito_client_id,
+                "GAR_COGNITO_SCOPE": cognito_scope,
             },
             code=lambda_.Code.from_asset(
                 _BACKEND_DIR,
@@ -120,7 +113,6 @@ class BackendStack(Stack):
         runs_table.grant_read_write_data(fn)  # table + its GSIs
         state_bucket.grant_read_write(fn)  # run-state pool + audit log
         anthropic_secret.grant_read(fn)
-        app_api_key_secret.grant_read(fn)
 
         # Allow the function to invoke itself asynchronously to run a segment
         # off the request thread (api/segments.LambdaRunner). Scoped to this
@@ -141,20 +133,19 @@ class BackendStack(Stack):
             )
         )
 
-        # auth_type NONE: the URL is publicly reachable but gated by the app
-        # API key (auth.require_api_key) — clients send X-GAR-API-Key, which
-        # they can do over plain HTTP (no SigV4). CORS lets the browser
-        # frontend (a different origin) call it; the key, not the origin, is
+        # auth_type NONE: the URL is publicly reachable but gated in-app by
+        # Cognito JWT verification (api/auth) — clients send Authorization:
+        # Bearer <token> over plain HTTP (no SigV4). CORS lets the browser
+        # frontend (a different origin) call it; the token, not the origin, is
         # the gate.
         url = fn.add_function_url(
             auth_type=lambda_.FunctionUrlAuthType.NONE,
             cors=lambda_.FunctionUrlCorsOptions(
                 allowed_origins=["*"],
                 allowed_methods=[lambda_.HttpMethod.ALL],
-                allowed_headers=["content-type", "x-gar-api-key", "x-gar-client"],
+                allowed_headers=["content-type", "authorization", "x-gar-client"],
             ),
         )
         self.api_function = fn
         CfnOutput(self, "ApiFunctionUrl", value=url.url)
         CfnOutput(self, "AnthropicSecretArn", value=anthropic_secret.secret_arn)
-        CfnOutput(self, "AppApiKeySecretArn", value=app_api_key_secret.secret_arn)

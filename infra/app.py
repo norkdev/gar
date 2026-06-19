@@ -1,7 +1,7 @@
 """CDK application entry point.
 
-Synthesizes five stacks; each is independently deployable.
-v1 skeleton — all stacks are empty shells. Resources will be added per spec §9.
+Synthesizes the stacks; each is independently deployable. Data + Auth + Backend
+carry real resources (v2.x); Workflow + Frontend are scaffolds.
 """
 
 import aws_cdk as cdk
@@ -14,14 +14,17 @@ from stacks.workflow_stack import WorkflowStack
 app = cdk.App()
 
 data = DataStack(app, "GarDataStack")
+auth = AuthStack(app, "GarAuthStack")
 WorkflowStack(app, "GarWorkflowStack")
 BackendStack(
     app,
     "GarBackendStack",
     runs_table=data.runs_table,
     state_bucket=data.state_bucket,
+    cognito_issuer=auth.issuer,
+    cognito_client_id=auth.m2m_client.user_pool_client_id,
+    cognito_scope=auth.api_scope,
 )
 FrontendStack(app, "GarFrontendStack")
-AuthStack(app, "GarAuthStack")
 
 app.synth()
