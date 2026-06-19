@@ -84,6 +84,13 @@ def client_from_request(request: Request) -> str | None:
     return value if value in KNOWN_CLIENTS else None
 
 
+def get_client(request: Request) -> str | None:
+    """The calling surface (web / cli / mcp) as a plain value, for callers that
+    need it apart from the audit logger — e.g. the segment runner, which carries
+    it across the async worker boundary so the worker can attribute the run."""
+    return client_from_request(request)
+
+
 def get_request_audit_logger(
     request: Request,
     base: AuditLogger = Depends(get_audit_logger),
