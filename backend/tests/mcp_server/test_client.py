@@ -36,11 +36,12 @@ async def test_every_request_carries_mcp_client_header() -> None:
     await client.aclose()
 
 
-async def test_api_key_sent_as_bearer_when_set() -> None:
+async def test_api_key_sent_in_gar_header_when_set() -> None:
     rec: list[httpx.Request] = []
     client = make_client(recording_handler([], recorder=rec), api_key="secret")
     await client.list_runs()
-    assert rec[0].headers["authorization"] == "Bearer secret"
+    assert rec[0].headers["x-gar-api-key"] == "secret"
+    assert "authorization" not in rec[0].headers  # reserved for user identity
     await client.aclose()
 
 

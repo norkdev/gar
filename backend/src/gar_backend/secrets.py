@@ -1,13 +1,12 @@
 """Resolve runtime credentials from the environment or AWS Secrets Manager.
 
-Local dev keeps ``ANTHROPIC_API_KEY`` in ``.env`` (loaded at import). On
-Lambda the key must not live in an env var or the image, so the function is
-deployed with ``GAR_ANTHROPIC_SECRET_ARN`` pointing at a Secrets Manager
-secret; the value is fetched once at cold start (see ``deps.get_llm_client``).
+Local dev keeps secrets in ``.env`` (loaded at import). On Lambda they must not
+live in an env var or the image, so the function is deployed with a Secrets
+Manager ARN per credential; the value is fetched once at first use.
 
-The secret value may be the raw key or a JSON object carrying it under
-``ANTHROPIC_API_KEY`` — both shapes are accepted so the secret can be managed
-either way without a code change.
+A secret value may be the raw string or a JSON object carrying it under a named
+key — both shapes are accepted so a secret can be managed either way without a
+code change.
 """
 
 from __future__ import annotations
@@ -15,48 +14,60 @@ from __future__ import annotations
 import json
 import os
 
-# Env var holding the Secrets Manager ARN (set by the BackendStack). When the
-# key is already present in the environment (local dev), the secret is not
-# consulted at all.
-SECRET_ARN_ENV = "GAR_ANTHROPIC_SECRET_ARN"
-API_KEY_ENV = "ANTHROPIC_API_KEY"
+# Anthropic key: explicit env wins (local/tests), else this Secrets Manager ARN.
+ANTHROPIC_SECRET_ARN_ENV = "GAR_ANTHROPIC_SECRET_ARN"
+ANTHROPIC_API_KEY_ENV = "ANTHROPIC_API_KEY"
+
+# App API key gating the HTTP boundary (see auth.py).
+API_KEY_ENV = "GAR_API_KEY"
+API_KEY_SECRET_ARN_ENV = "GAR_API_KEY_SECRET_ARN"
 
 
 def resolve_anthropic_api_key() -> str | None:
-    """Return the Anthropic API key, or None to defer to the SDK's own lookup.
+    """The Anthropic API key, or None to defer to the SDK's own env lookup."""
+    return _resolve_secret(
+        env_var=ANTHROPIC_API_KEY_ENV,
+        arn_var=ANTHROPIC_SECRET_ARN_ENV,
+        json_key=ANTHROPIC_API_KEY_ENV,
+    )
 
-    Precedence: an explicit ``ANTHROPIC_API_KEY`` (local dev / tests) wins, so
-    nothing hits AWS off-Lambda. Otherwise, if ``GAR_ANTHROPIC_SECRET_ARN`` is
-    set, fetch the secret. None means "no override" — ``AsyncAnthropic()`` will
-    do its usual env lookup and raise a clear error if the key is truly absent.
-    """
-    key = os.environ.get(API_KEY_ENV)
-    if key:
-        return key
 
-    arn = os.environ.get(SECRET_ARN_ENV)
+def resolve_api_key() -> str | None:
+    """The app API key, or None when no key is configured (auth disabled)."""
+    return _resolve_secret(env_var=API_KEY_ENV, arn_var=API_KEY_SECRET_ARN_ENV)
+
+
+def _resolve_secret(
+    *, env_var: str, arn_var: str, json_key: str | None = None
+) -> str | None:
+    """Env var wins (so nothing hits AWS off-Lambda); else fetch the secret at
+    ``arn_var`` from Secrets Manager. None means "not configured"."""
+    value = os.environ.get(env_var)
+    if value:
+        return value
+
+    arn = os.environ.get(arn_var)
     if not arn:
         return None
 
     # Lazy import: boto3 is provided by the Lambda runtime and excluded from the
-    # deployment bundle, so importing it at module load would slow cold starts
-    # and pointlessly couple non-AWS code paths to boto3.
+    # deployment bundle, so importing it at module load would slow cold starts.
     import boto3
 
     client = boto3.client("secretsmanager")
     secret = client.get_secret_value(SecretId=arn)["SecretString"]
-    return _extract_key(secret)
+    return _extract(secret, json_key)
 
 
-def _extract_key(secret: str) -> str:
-    """Accept either a raw key or a JSON object carrying it."""
+def _extract(secret: str, json_key: str | None) -> str:
+    """Accept either a raw secret or a JSON object carrying it under ``json_key``."""
     secret = secret.strip()
-    if secret.startswith("{"):
+    if json_key and secret.startswith("{"):
         try:
             data = json.loads(secret)
         except json.JSONDecodeError:
             return secret
-        value = data.get(API_KEY_ENV)
+        value = data.get(json_key)
         if isinstance(value, str) and value:
             return value
     return secret
