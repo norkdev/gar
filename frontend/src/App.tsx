@@ -2,10 +2,11 @@
 
 import { useState } from "react";
 import { ThemeToggle } from "./components/ThemeToggle";
-import type { RunState } from "./lib/api";
+import { isInProgress, type RunState } from "./lib/api";
 import { Completed } from "./views/Completed";
 import { ConceptReview } from "./views/ConceptReview";
 import { FinalReport } from "./views/FinalReport";
+import { Processing } from "./views/Processing";
 import { SourceSelection } from "./views/SourceSelection";
 import { Start } from "./views/Start";
 
@@ -35,17 +36,15 @@ function renderView(state: RunState | null, setState: (s: RunState | null) => vo
     case "failed":
       return <Completed state={state} onRestart={() => setState(null)} />;
     default:
-      // deriving_concept / searching / evaluating: these are in-progress
-      // statuses that should be transient because the previous POST blocked
-      // until a gate. Treat as an unexpected interim and offer to retry.
+      // deriving_concept / searching / evaluating: a segment is running
+      // server-side. Poll until it settles on the next gate or a terminal
+      // status, then re-render the matching view above.
+      if (isInProgress(state.status)) {
+        return <Processing state={state} onAdvanced={setState} onRestart={() => setState(null)} />;
+      }
       return (
         <main>
           <h1>Unexpected status: {state.status}</h1>
-          <p className="muted">
-            The agent reported an intermediate state instead of a gate. This can happen if a
-            server-side timeout cut off a phase. The run still exists; you can refresh later via GET
-            /runs/{state.run_id}.
-          </p>
           <p style={{ marginTop: "1rem" }}>
             <button className="secondary" onClick={() => setState(null)}>
               Start a new run
