@@ -8,6 +8,7 @@ under test.
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 from fastapi import Depends, Request
@@ -42,8 +43,10 @@ def get_run_store() -> RunStore:
 
 def get_audit_log_path() -> Path:
     """Path to the audit log file. Source of truth shared by the file sink
-    (which writes) and the SSE endpoint (which tails)."""
-    return DEFAULT_AUDIT_LOG_PATH
+    (which writes) and the SSE endpoint (which tails). Override with
+    ``GAR_AUDIT_LOG_PATH`` — e.g. ``/tmp`` on Lambda, where the app dir is
+    read-only (the S3 audit sink replaces this file sink in a later slice)."""
+    return Path(os.environ.get("GAR_AUDIT_LOG_PATH") or DEFAULT_AUDIT_LOG_PATH)
 
 
 def get_audit_logger() -> AuditLogger:
