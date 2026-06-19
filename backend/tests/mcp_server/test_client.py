@@ -36,13 +36,56 @@ async def test_every_request_carries_mcp_client_header() -> None:
     await client.aclose()
 
 
-async def test_api_key_sent_in_gar_header_when_set() -> None:
+async def test_no_authorization_header_without_a_token_provider() -> None:
     rec: list[httpx.Request] = []
-    client = make_client(recording_handler([], recorder=rec), api_key="secret")
+    client = make_client(recording_handler([], recorder=rec))  # no provider
     await client.list_runs()
-    assert rec[0].headers["x-gar-api-key"] == "secret"
-    assert "authorization" not in rec[0].headers  # reserved for user identity
+    assert "authorization" not in rec[0].headers
     await client.aclose()
+
+
+async def test_bearer_token_sent_when_token_provider_set() -> None:
+    rec: list[httpx.Request] = []
+
+    class _StubProvider:
+        async def token(self) -> str:
+            return "jwt-abc"
+
+        async def aclose(self) -> None:
+            pass
+
+    client = make_client(recording_handler([], recorder=rec), token_provider=_StubProvider())
+    await client.list_runs()
+    assert rec[0].headers["authorization"] == "Bearer jwt-abc"
+    await client.aclose()
+
+
+async def test_m2m_provider_fetches_then_caches() -> None:
+    from gar_backend.mcp_server.client import M2MTokenProvider
+
+    calls: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(request)
+        return httpx.Response(200, json={"access_token": "tok-1", "expires_in": 3600})
+
+    provider = M2MTokenProvider(
+        token_endpoint="https://cognito.example/oauth2/token",
+        client_id="cid",
+        client_secret="sec",
+        scope="gar-api/access",
+        transport=httpx.MockTransport(handler),
+    )
+    assert await provider.token() == "tok-1"
+    assert await provider.token() == "tok-1"
+    assert len(calls) == 1  # second call served from cache
+
+    sent = calls[0]
+    assert sent.method == "POST"
+    assert sent.headers["authorization"].startswith("Basic ")  # client_id:secret
+    body = sent.content.decode()
+    assert "grant_type=client_credentials" in body
+    await provider.aclose()
 
 
 async def test_no_authorization_header_without_key() -> None:

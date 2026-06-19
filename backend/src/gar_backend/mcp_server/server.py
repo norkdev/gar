@@ -3,8 +3,11 @@
 Run it with the ``gar-mcp`` console script. Configuration is by environment:
 
 - ``GAR_API_URL``  — GAR backend REST base URL (default http://localhost:8000)
-- ``GAR_API_KEY``  — optional bearer token sent on every request
 - ``GAR_MCP_ROLE`` — ``public`` (default) | ``owner``; gates which tools appear
+- Cognito M2M (only when the backend enforces auth — i.e. the cloud):
+  ``GAR_COGNITO_TOKEN_ENDPOINT`` / ``GAR_COGNITO_CLIENT_ID`` /
+  ``GAR_COGNITO_CLIENT_SECRET`` / ``GAR_COGNITO_SCOPE``. The client fetches a
+  short-lived bearer token (client-credentials) and sends it as Authorization.
 
 The server is a thin client of the REST API (plan D-102), so the same process
 works against a local or a remote backend by changing only GAR_API_URL.
