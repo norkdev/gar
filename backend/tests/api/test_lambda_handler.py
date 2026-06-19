@@ -1,5 +1,6 @@
 """main.handler routes worker events to the segment worker, else to Mangum."""
 
+import asyncio
 from types import SimpleNamespace
 from typing import Any
 
@@ -24,6 +25,28 @@ def test_worker_event_runs_segment(monkeypatch: pytest.MonkeyPatch) -> None:
 
     assert seen == {"run_id": "r1", "client": "mcp"}
     assert out == {"ok": True, "run_id": "r1", "status": "searching"}
+
+
+def test_worker_event_leaves_main_thread_loop_usable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Regression: the worker ran asyncio.run() on the main thread, which clears
+    # its event loop on exit; Mangum reuses that loop across warm invocations,
+    # so the next HTTP request 502'd ("no current event loop"). The worker must
+    # run isolated and leave the main thread's loop untouched.
+    async def _fake_segment(run_id: str, *, client: str | None) -> Any:
+        return SimpleNamespace(status=SimpleNamespace(value="searching"))
+
+    monkeypatch.setattr(main, "run_worker_segment", _fake_segment)
+
+    loop = asyncio.new_event_loop()  # as a warm container's main thread would have
+    asyncio.set_event_loop(loop)
+    try:
+        main.handler({WORKER_EVENT_KEY: {"run_id": "r1", "client": None}}, context=None)
+        assert asyncio.get_event_loop() is loop  # still current, not cleared
+    finally:
+        loop.close()
+        asyncio.set_event_loop(None)
 
 
 def test_http_event_goes_to_mangum(monkeypatch: pytest.MonkeyPatch) -> None:
