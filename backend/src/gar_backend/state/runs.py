@@ -56,72 +56,103 @@ DEFAULT_RUNS_TABLE = "gar-runs"
 TENANT_INDEX = "tenant-index"
 
 
-def _to_item(state: RunState) -> dict[str, Any]:
-    """Serialize a RunState to a DynamoDB item.
+# Attribute on the DynamoDB item recording the S3 key of an offloaded pool.
+_POOL_ATTR = "candidates_key"
 
-    The queryable keys (run_id / tenant_id / status / updated_at) are top-level
-    attributes; the rest of the state is one JSON document under ``state``.
-    Storing the body as JSON sidesteps DynamoDB's native-type rules (floats must
-    be Decimal, empty-string / nested-map edge cases) and round-trips losslessly.
-    """
+
+def _state_body(state: RunState, *, drop_candidates: bool) -> dict[str, Any]:
+    """The non-key part of a RunState, as a JSON-able dict. When the candidate
+    pool is offloaded to S3, it is dropped here and pointed to by _POOL_ATTR."""
+    pending = state.pending_payload
+    if drop_candidates and "candidates" in pending:
+        pending = {k: v for k, v in pending.items() if k != "candidates"}
     return {
-        "run_id": state.run_id,
-        "tenant_id": state.tenant_id,
-        "status": state.status.value,
-        "updated_at": state.updated_at.isoformat(),
-        "state": json.dumps(
-            {
-                "context": state.context,
-                "pending_payload": state.pending_payload,
-                "adopted_source_ids": list(state.adopted_source_ids),
-                "error": state.error,
-            },
-            default=str,
-        ),
+        "context": state.context,
+        "pending_payload": pending,
+        "adopted_source_ids": list(state.adopted_source_ids),
+        "error": state.error,
     }
 
 
-def _from_item(item: dict[str, Any]) -> RunState:
-    body = json.loads(item["state"])
-    return RunState(
-        run_id=item["run_id"],
-        tenant_id=item["tenant_id"],
-        status=RunStatus(item["status"]),
-        context=body.get("context") or {},
-        pending_payload=body.get("pending_payload") or {},
-        adopted_source_ids=tuple(body.get("adopted_source_ids") or ()),
-        error=body.get("error"),
-        updated_at=datetime.fromisoformat(item["updated_at"]),
-    )
-
-
 class DynamoDbRunStore:
-    """RunStore backed by a DynamoDB table — the seam-#3 swap for AWS (v2).
+    """RunStore backed by DynamoDB, with the candidate pool offloaded to S3.
 
     Table schema: partition key ``run_id``; a GSI ``tenant-index`` (partition
-    ``tenant_id``, sort ``updated_at``, ALL projection) backs
-    ``list_for_tenant`` newest-first. The CDK DataStack creates the table;
-    tests inject a moto-created one.
+    ``tenant_id``, sort ``updated_at``, ALL projection) backs ``list_for_tenant``
+    newest-first. RunState is stored as a JSON document under ``state`` plus the
+    queryable keys as top-level attributes — sidesteps DynamoDB's native-type
+    rules (floats must be Decimal, empty-string / nested-map edge cases) and
+    round-trips losslessly.
 
-    boto3 is synchronous, so each call runs in a worker thread to honor the
-    async Protocol without blocking the event loop.
+    **Pool offload (plan §10 D-204).** The sources-gate candidate pool (~300
+    abstracts) can exceed DynamoDB's 400 KB item limit and is *working data*, not
+    the deliverable. When ``bucket`` is configured, the pool is written to S3
+    (``<tenant>/<run_id>/candidates.json``) and replaced in the item by a
+    ``candidates_key`` pointer; ``get`` rehydrates it, ``list_for_tenant`` does
+    not (a list needs summaries, not pools). With no bucket the pool stays inline
+    (fine below 400 KB), so the store also works without S3 in dev/tests.
+
+    boto3 is synchronous, so calls run in a worker thread to honor the async
+    Protocol without blocking the event loop.
     """
 
-    def __init__(self, *, table: Any = None, table_name: str | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        table: Any = None,
+        table_name: str | None = None,
+        bucket: str | None = None,
+        s3: Any = None,
+    ) -> None:
         if table is None:
             import boto3  # lazy: keep boto3 off the in-memory / CLI import path
 
             name = table_name or os.environ.get("GAR_RUNS_TABLE", DEFAULT_RUNS_TABLE)
             table = boto3.resource("dynamodb").Table(name)
         self._table = table
+        self._bucket = bucket or os.environ.get("GAR_STATE_BUCKET")
+        self._s3 = s3
+
+    def _s3_client(self) -> Any:
+        if self._s3 is None:
+            import boto3
+
+            self._s3 = boto3.client("s3")
+        return self._s3
+
+    @staticmethod
+    def _pool_key(state: RunState) -> str:
+        return f"{state.tenant_id}/{state.run_id}/candidates.json"
 
     async def save(self, state: RunState) -> None:
-        await asyncio.to_thread(self._table.put_item, Item=_to_item(state))
+        candidates = state.pending_payload.get("candidates")
+        offload = bool(self._bucket and candidates)
+        item: dict[str, Any] = {
+            "run_id": state.run_id,
+            "tenant_id": state.tenant_id,
+            "status": state.status.value,
+            "updated_at": state.updated_at.isoformat(),
+            "state": json.dumps(
+                _state_body(state, drop_candidates=offload), default=str
+            ),
+        }
+        if offload:
+            key = self._pool_key(state)
+            await asyncio.to_thread(
+                self._s3_client().put_object,
+                Bucket=self._bucket,
+                Key=key,
+                Body=json.dumps(candidates, default=str).encode(),
+            )
+            item[_POOL_ATTR] = key
+        await asyncio.to_thread(self._table.put_item, Item=item)
 
     async def get(self, run_id: str) -> RunState | None:
         resp = await asyncio.to_thread(self._table.get_item, Key={"run_id": run_id})
         item = resp.get("Item")
-        return _from_item(item) if item else None
+        if not item:
+            return None
+        return await self._hydrate(item, with_pool=True)
 
     async def list_for_tenant(self, tenant_id: str) -> list[RunState]:
         from boto3.dynamodb.conditions import Key
@@ -139,4 +170,26 @@ class DynamoDbRunStore:
             if not start:
                 break
             kwargs["ExclusiveStartKey"] = start
-        return [_from_item(it) for it in items]
+        # A list is summaries — don't fetch each run's pool back from S3.
+        return [await self._hydrate(it, with_pool=False) for it in items]
+
+    async def _hydrate(self, item: dict[str, Any], *, with_pool: bool) -> RunState:
+        body = json.loads(item["state"])
+        pending = body.get("pending_payload") or {}
+        key = item.get(_POOL_ATTR)
+        if key and with_pool and self._bucket:
+            resp = await asyncio.to_thread(
+                self._s3_client().get_object, Bucket=self._bucket, Key=key
+            )
+            raw = await asyncio.to_thread(resp["Body"].read)
+            pending = {**pending, "candidates": json.loads(raw)}
+        return RunState(
+            run_id=item["run_id"],
+            tenant_id=item["tenant_id"],
+            status=RunStatus(item["status"]),
+            context=body.get("context") or {},
+            pending_payload=pending,
+            adopted_source_ids=tuple(body.get("adopted_source_ids") or ()),
+            error=body.get("error"),
+            updated_at=datetime.fromisoformat(item["updated_at"]),
+        )
