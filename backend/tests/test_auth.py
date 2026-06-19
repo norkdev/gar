@@ -84,8 +84,13 @@ def test_rejects_missing_required_scope() -> None:
 def test_rejects_bad_signature() -> None:
     other = rsa.generate_private_key(public_exponent=65537, key_size=2048)
     forged = jwt.encode(
-        {"iss": ISSUER, "sub": "x", "client_id": CLIENT_ID, "scope": SCOPE,
-         "exp": int(time.time()) + 60},
+        {
+            "iss": ISSUER,
+            "sub": "x",
+            "client_id": CLIENT_ID,
+            "scope": SCOPE,
+            "exp": int(time.time()) + 60,
+        },
         other,
         algorithm="RS256",
     )

@@ -160,7 +160,9 @@ async def run_worker_segment(run_id: str, *, client: str | None) -> RunState:
         store=store,
         audit=get_audit_logger().for_client(client),
         llm=get_llm_client(),
-        access=AccessContext(tenant_id=state.tenant_id, role="owner"),
+        access=AccessContext(
+            tenant_id=state.tenant_id, user_id=state.owner_user_id, role="owner"
+        ),
         public_source=get_public_source(),
     )
     return await run_until_gate(run_id=run_id, ctx=ctx)

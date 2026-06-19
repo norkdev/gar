@@ -130,6 +130,7 @@ class DynamoDbRunStore:
         item: dict[str, Any] = {
             "run_id": state.run_id,
             "tenant_id": state.tenant_id,
+            "owner_user_id": state.owner_user_id,
             "status": state.status.value,
             "updated_at": state.updated_at.isoformat(),
             "state": json.dumps(
@@ -186,6 +187,7 @@ class DynamoDbRunStore:
         return RunState(
             run_id=item["run_id"],
             tenant_id=item["tenant_id"],
+            owner_user_id=item.get("owner_user_id", "local-owner"),
             status=RunStatus(item["status"]),
             context=body.get("context") or {},
             pending_payload=pending,
