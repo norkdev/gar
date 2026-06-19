@@ -1,5 +1,5 @@
 {
-  "app": "python app.py",
+  "app": "uv run --package gar-infra python app.py",
   "watch": {
     "exclude": [
       "**/__pycache__",
