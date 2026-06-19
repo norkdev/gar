@@ -26,5 +26,7 @@ def _hermetic_reranker_env(monkeypatch: pytest.MonkeyPatch) -> None:
         "GAR_MODEL_SEARCH",
         "GAR_MODEL_COMPOSE",
         "GAR_THOROUGH",
+        "GAR_RUNS_TABLE",
+        "GAR_STATE_BUCKET",
     ):
         monkeypatch.delenv(var, raising=False)

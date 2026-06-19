@@ -1,5 +1,6 @@
 """DynamoDbRunStore tests — fully offline via moto (no real AWS)."""
 
+import json
 from datetime import UTC, datetime
 from typing import Any
 
@@ -10,6 +11,7 @@ from gar_backend.state.runs import TENANT_INDEX, DynamoDbRunStore
 from moto import mock_aws
 
 TABLE = "gar-runs"
+BUCKET = "gar-state"
 
 
 def _create_table() -> Any:
@@ -112,3 +114,66 @@ async def test_list_for_tenant_orders_newest_first_and_filters(
 
 async def test_list_for_tenant_empty(store: DynamoDbRunStore) -> None:
     assert await store.list_for_tenant("nobody") == []
+
+
+# ---- S3 candidate-pool offload (slice 1b) ----
+
+
+@pytest.fixture
+def store_s3(monkeypatch: pytest.MonkeyPatch) -> Any:
+    monkeypatch.setenv("AWS_ACCESS_KEY_ID", "testing")
+    monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "testing")
+    monkeypatch.setenv("AWS_DEFAULT_REGION", "ap-northeast-1")
+    with mock_aws():
+        table = _create_table()
+        boto3.client("s3", region_name="ap-northeast-1").create_bucket(
+            Bucket=BUCKET,
+            CreateBucketConfiguration={"LocationConstraint": "ap-northeast-1"},
+        )
+        yield DynamoDbRunStore(table=table, bucket=BUCKET)
+
+
+def _raw_item(run_id: str) -> dict:
+    table = boto3.resource("dynamodb", region_name="ap-northeast-1").Table(TABLE)
+    return table.get_item(Key={"run_id": run_id})["Item"]
+
+
+async def test_pool_offloaded_to_s3_and_rehydrated(store_s3: DynamoDbRunStore) -> None:
+    expected = _state().pending_payload["candidates"]
+    await store_s3.save(_state())  # r1, has candidates
+
+    item = _raw_item("r1")
+    assert "candidates_key" in item  # pointer recorded
+    body = json.loads(item["state"])
+    assert "candidates" not in body["pending_payload"]  # NOT stored inline in Dynamo
+
+    s3 = boto3.client("s3", region_name="ap-northeast-1")
+    pool = json.loads(
+        s3.get_object(Bucket=BUCKET, Key=item["candidates_key"])["Body"].read()
+    )
+    assert pool == expected  # the pool lives in S3
+
+    got = await store_s3.get("r1")  # get() rehydrates it
+    assert got is not None
+    assert got.pending_payload["candidates"] == expected
+
+
+async def test_list_does_not_rehydrate_pool(store_s3: DynamoDbRunStore) -> None:
+    await store_s3.save(_state("a1", "alice"))  # candidates offloaded
+    out = await store_s3.list_for_tenant("alice")
+    assert len(out) == 1
+    assert "candidates" not in out[0].pending_payload  # lean: pool not fetched
+    assert out[0].context["concept"] == "a concept"  # rest of the state intact
+
+
+async def test_no_candidates_means_no_s3_object(store_s3: DynamoDbRunStore) -> None:
+    s = RunState(
+        run_id="r2",
+        tenant_id="default",
+        status=RunStatus.AWAITING_REPORT_APPROVAL,
+        pending_payload={"report": "# Report"},
+    )
+    await store_s3.save(s)
+    assert "candidates_key" not in _raw_item("r2")  # nothing offloaded
+    got = await store_s3.get("r2")
+    assert got is not None and got.pending_payload == {"report": "# Report"}
