@@ -1,8 +1,8 @@
 """Structured audit log (JSONL) of every tool call.
 
 Each record carries `schema_version` (spec §10 seam #6) so the log can evolve
-safely. v1: writes to a local file via FileAuditSink. Phase 1+: pluggable
-sinks (S3, CloudWatch) implementing the same AuditSink Protocol.
+safely. Two sinks implement the same AuditSink Protocol: FileAuditSink (local
+dev) and S3AuditSink (durable, on Lambda); selected in `api/deps.py` by env.
 
 Sync API on purpose for v1: file writes are short and called from async tool
 handlers without blocking the event loop meaningfully. The Protocol stays
@@ -11,8 +11,10 @@ sync-shaped so swapping in async sinks later is an explicit decision.
 
 from __future__ import annotations
 
+import itertools
 import json
 import threading
+import uuid
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -61,6 +63,67 @@ class FileAuditSink:
         line = json.dumps(payload, ensure_ascii=False, default=str) + "\n"
         with self._lock, self._path.open("a", encoding="utf-8") as f:
             f.write(line)
+
+
+class S3AuditSink:
+    """Durable append-only audit log in S3 — one immutable object per record.
+
+    S3 has no append, and a run is split across multiple Lambda invocations by
+    the HITL gates (each gate ends one invocation; approval starts the next).
+    A single per-run object would therefore be *overwritten* by a later
+    invocation that only holds the later records. Writing one object per record
+    instead is naturally append-only: no read-modify-write, no lost segments
+    across invocation boundaries, no cross-writer races.
+
+    Keys are ``{prefix}/{tenant_id}/{run_id}/{timestamp}-{nonce}-{seq}.json``.
+    A reader reassembles a run's log by listing the ``{prefix}/{tenant}/{run}/``
+    prefix; chronological order comes from each record's own ``timestamp``
+    field (the key components only guarantee uniqueness). That reader — for the
+    SSE feed and run replay on Lambda — lands in a later slice; v2.0 needs the
+    durable write only.
+
+    Thread-safe. boto3 is imported lazily (the Lambda runtime provides it; it is
+    excluded from the deployment bundle).
+    """
+
+    def __init__(
+        self, bucket: str, *, prefix: str = "audit", s3: Any | None = None
+    ) -> None:
+        self._bucket = bucket
+        self._prefix = prefix.strip("/")
+        self._s3 = s3
+        self._lock = threading.Lock()
+        self._counter = itertools.count()
+        # Per-instance nonce disambiguates records emitted in the same
+        # millisecond by different warm containers writing to the same run.
+        self._nonce = uuid.uuid4().hex[:8]
+
+    def _client(self) -> Any:
+        if self._s3 is None:
+            import boto3
+
+            self._s3 = boto3.client("s3")
+        return self._s3
+
+    def write(self, payload: dict[str, Any]) -> None:
+        tenant_id = payload.get("tenant_id") or "default"
+        run_id = payload.get("run_id") or "unknown"
+        timestamp = payload.get("timestamp") or datetime.now(UTC).isoformat()
+        with self._lock:
+            seq = next(self._counter)
+        # Colons in the ISO timestamp are valid in S3 keys but awkward in
+        # tooling; swap for a filesystem-friendly separator.
+        stamp = str(timestamp).replace(":", "").replace("+", "Z")
+        key = (
+            f"{self._prefix}/{tenant_id}/{run_id}/{stamp}-{self._nonce}-{seq:06d}.json"
+        )
+        body = json.dumps(payload, ensure_ascii=False, default=str).encode("utf-8")
+        self._client().put_object(
+            Bucket=self._bucket,
+            Key=key,
+            Body=body,
+            ContentType="application/json",
+        )
 
 
 class AuditLogger:
