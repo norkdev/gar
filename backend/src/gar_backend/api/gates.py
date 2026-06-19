@@ -19,6 +19,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
 from gar_backend.agent.llm import LLMClient
+from gar_backend.api.access import authorize_run
 from gar_backend.api.agent_wiring import build_agent_context, ideas_source_for_state
 from gar_backend.api.deps import (
     get_access_context,
@@ -96,6 +97,7 @@ async def approve_concept_endpoint(
     state = await store.get(run_id)
     if state is None:
         raise HTTPException(404, f"Run {run_id} not found")
+    authorize_run(state, access)
     try:
         new_state = approve_concept(state, edited_concept=req.edited_concept)
     except InvalidTransition as exc:
@@ -128,6 +130,7 @@ async def select_sources_endpoint(
     state = await store.get(run_id)
     if state is None:
         raise HTTPException(404, f"Run {run_id} not found")
+    authorize_run(state, access)
     try:
         new_state = select_sources(state, adopted_source_ids=req.adopted_source_ids)
     except InvalidTransition as exc:
@@ -154,6 +157,7 @@ async def approve_report_endpoint(
     state = await store.get(run_id)
     if state is None:
         raise HTTPException(404, f"Run {run_id} not found")
+    authorize_run(state, access)
     try:
         new_state = approve_report(state)
     except InvalidTransition as exc:

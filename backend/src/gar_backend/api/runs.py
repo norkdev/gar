@@ -1,8 +1,8 @@
 """HTTP routes for run lifecycle (start, get, list).
 
 POST /runs       — create a new run, drive the agent to the first gate
-GET  /runs       — list runs for the current tenant
-GET  /runs/{id}  — fetch one run's state
+GET  /runs       — list the caller's own runs (tenant + owner, D-202)
+GET  /runs/{id}  — fetch one run's state (404 unless the caller owns it)
 """
 
 from __future__ import annotations
@@ -16,6 +16,7 @@ from pydantic import BaseModel, model_validator
 
 from gar_backend.agent.llm import LLMClient
 from gar_backend.agent.loop import create_run
+from gar_backend.api.access import authorize_run
 from gar_backend.api.agent_wiring import build_agent_context, ideas_source_for_state
 from gar_backend.api.deps import (
     get_access_context,
@@ -65,6 +66,7 @@ def serialize_state(state: RunState) -> dict[str, Any]:
     return {
         "run_id": state.run_id,
         "tenant_id": state.tenant_id,
+        "owner_user_id": state.owner_user_id,
         "status": state.status.value,
         "context": state.context,
         "pending_payload": state.pending_payload,
@@ -94,13 +96,17 @@ async def create_run_endpoint(
                 status_code=400, detail=f"vault_path does not exist: {vault_path}"
             )
         state = create_run(
-            run_id=run_id, tenant_id=access.tenant_id, vault_path=vault_path
+            run_id=run_id,
+            tenant_id=access.tenant_id,
+            owner_user_id=access.user_id,
+            vault_path=vault_path,
         )
     else:
         assert req.notes_content is not None  # validator guarantees
         state = create_run(
             run_id=run_id,
             tenant_id=access.tenant_id,
+            owner_user_id=access.user_id,
             notes_content=[
                 {"path": n.path, "content": n.content} for n in req.notes_content
             ],
@@ -127,10 +133,12 @@ async def create_run_endpoint(
 async def get_run_endpoint(
     run_id: str,
     store: RunStore = Depends(get_run_store),
+    access: AccessContext = Depends(get_access_context),
 ) -> dict[str, Any]:
     state = await store.get(run_id)
     if state is None:
         raise HTTPException(status_code=404, detail=f"Run {run_id} not found")
+    authorize_run(state, access)  # 404 if not the caller's run (tenant + owner)
     return serialize_state(state)
 
 
@@ -139,5 +147,7 @@ async def list_runs_endpoint(
     store: RunStore = Depends(get_run_store),
     access: AccessContext = Depends(get_access_context),
 ) -> list[dict[str, Any]]:
+    # list_for_tenant enforces the isolation axis; filter the idea-privacy axis
+    # (the caller's own runs) here. Sharing would relax this filter later.
     states = await store.list_for_tenant(access.tenant_id)
-    return [serialize_state(s) for s in states]
+    return [serialize_state(s) for s in states if s.owner_user_id == access.user_id]

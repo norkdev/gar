@@ -142,9 +142,7 @@ class GarApiClient:
         self._base_url = resolved.rstrip("/")
         self._headers = {"X-GAR-Client": "mcp"}
         self._token_provider: TokenProvider | None = (
-            _token_provider_from_env()
-            if token_provider is _USE_ENV
-            else token_provider  # type: ignore[assignment]
+            _token_provider_from_env() if token_provider is _USE_ENV else token_provider  # type: ignore[assignment]
         )
         self._client = httpx.AsyncClient(
             base_url=self._base_url,

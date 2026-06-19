@@ -30,12 +30,14 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 
-from gar_backend.api.deps import get_audit_log_path, get_run_store
+from gar_backend.api.access import authorize_run
+from gar_backend.api.deps import get_access_context, get_audit_log_path, get_run_store
 from gar_backend.api.runs import serialize_state
 from gar_backend.governance.hitl import (
     is_awaiting_user,
     is_terminal,
 )
+from gar_backend.governance.rbac import AccessContext
 from gar_backend.state.runs import RunStore
 
 router = APIRouter(prefix="/runs/{run_id}/events", tags=["stream"])
@@ -55,10 +57,12 @@ async def stream_events(
     run_id: str,
     store: RunStore = Depends(get_run_store),
     audit_path: Path = Depends(get_audit_log_path),
+    access: AccessContext = Depends(get_access_context),
 ) -> StreamingResponse:
     state = await store.get(run_id)
     if state is None:
         raise HTTPException(status_code=404, detail=f"Run {run_id} not found")
+    authorize_run(state, access)
 
     async def event_generator() -> AsyncIterator[bytes]:
         yield _sse("state", serialize_state(state))

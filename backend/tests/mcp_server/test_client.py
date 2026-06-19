@@ -54,7 +54,9 @@ async def test_bearer_token_sent_when_token_provider_set() -> None:
         async def aclose(self) -> None:
             pass
 
-    client = make_client(recording_handler([], recorder=rec), token_provider=_StubProvider())
+    client = make_client(
+        recording_handler([], recorder=rec), token_provider=_StubProvider()
+    )
     await client.list_runs()
     assert rec[0].headers["authorization"] == "Bearer jwt-abc"
     await client.aclose()

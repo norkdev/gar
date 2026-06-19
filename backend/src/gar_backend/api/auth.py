@@ -112,7 +112,9 @@ def get_verifier() -> CognitoVerifier | None:
             _verifier = None
         else:
             client_ids = {
-                c.strip() for c in os.environ.get(CLIENT_IDS_ENV, "").split(",") if c.strip()
+                c.strip()
+                for c in os.environ.get(CLIENT_IDS_ENV, "").split(",")
+                if c.strip()
             }
             _verifier = CognitoVerifier(
                 issuer,

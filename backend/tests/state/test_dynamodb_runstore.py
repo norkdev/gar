@@ -72,6 +72,15 @@ def _state(
     )
 
 
+async def test_owner_user_id_round_trips(store: DynamoDbRunStore) -> None:
+    from dataclasses import replace
+
+    await store.save(replace(_state(), owner_user_id="alice"))
+    got = await store.get("r1")
+    assert got is not None
+    assert got.owner_user_id == "alice"  # idea-privacy boundary persists (D-202)
+
+
 async def test_save_and_get_round_trips(store: DynamoDbRunStore) -> None:
     s = _state()
     await store.save(s)

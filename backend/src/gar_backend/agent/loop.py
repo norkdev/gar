@@ -152,6 +152,7 @@ def create_run(
     *,
     run_id: str,
     tenant_id: str,
+    owner_user_id: str = "local-owner",
     vault_path: Path | None = None,
     notes_content: list[dict[str, str]] | None = None,
 ) -> RunState:
@@ -170,7 +171,7 @@ def create_run(
     """
     if (vault_path is None) == (notes_content is None):
         raise ValueError("provide exactly one of vault_path or notes_content")
-    base = start(run_id, tenant_id)
+    base = start(run_id, tenant_id, owner_user_id)
     context: dict[str, Any] = {}
     if vault_path is not None:
         context["vault_path"] = str(vault_path)

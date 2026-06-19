@@ -58,6 +58,10 @@ class RunState:
     run_id: str
     tenant_id: str
     status: RunStatus
+    # Two boundaries (D-202): tenant_id = isolation; owner_user_id = idea-privacy
+    # (whose run this is). Defaults so non-API constructors (tests) stay terse;
+    # the API sets it from the verified caller. Carried across transitions.
+    owner_user_id: str = "local-owner"
     context: dict[str, Any] = field(default_factory=dict)
     pending_payload: dict[str, Any] = field(default_factory=dict)
     adopted_source_ids: tuple[str, ...] = ()
@@ -69,12 +73,13 @@ class InvalidTransition(RuntimeError):
     """Raised when a transition is requested from a state that doesn't allow it."""
 
 
-def start(run_id: str, tenant_id: str) -> RunState:
+def start(run_id: str, tenant_id: str, owner_user_id: str = "local-owner") -> RunState:
     """Initial state — the agent will begin deriving a concept."""
     return RunState(
         run_id=run_id,
         tenant_id=tenant_id,
         status=RunStatus.DERIVING_CONCEPT,
+        owner_user_id=owner_user_id,
     )
 
 
