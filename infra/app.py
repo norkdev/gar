@@ -13,9 +13,14 @@ from stacks.workflow_stack import WorkflowStack
 
 app = cdk.App()
 
-DataStack(app, "GarDataStack")
+data = DataStack(app, "GarDataStack")
 WorkflowStack(app, "GarWorkflowStack")
-BackendStack(app, "GarBackendStack")
+BackendStack(
+    app,
+    "GarBackendStack",
+    runs_table=data.runs_table,
+    state_bucket=data.state_bucket,
+)
 FrontendStack(app, "GarFrontendStack")
 AuthStack(app, "GarAuthStack")
 

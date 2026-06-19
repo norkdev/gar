@@ -1,7 +1,7 @@
 """FastAPI application entry point.
 
-The Lambda handler (Mangum) will be wired in when deployment to AWS Lambda
-is added; for v1 we run via uvicorn locally.
+Run via uvicorn locally; on AWS Lambda the same `app` is served through the
+`handler` below (Mangum adapts the ASGI app to the Lambda event model).
 
 `.env` is loaded at import time so `ANTHROPIC_API_KEY` (and any future
 configuration env vars) is available before dependency providers run.
@@ -11,6 +11,7 @@ from __future__ import annotations
 
 from dotenv import load_dotenv
 from fastapi import FastAPI
+from mangum import Mangum
 
 from gar_backend.api import gates, runs, stream
 
@@ -28,3 +29,7 @@ app.include_router(stream.router)
 @app.get("/healthz")
 async def healthz() -> dict[str, str]:
     return {"status": "ok"}
+
+
+# AWS Lambda entry point (Function URL → Mangum → this ASGI app).
+handler = Mangum(app)
