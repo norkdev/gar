@@ -19,8 +19,8 @@ from fastapi import Depends, FastAPI
 from mangum import Mangum
 
 from gar_backend.api import gates, runs, stream
+from gar_backend.api.auth import require_api_key
 from gar_backend.api.segments import WORKER_EVENT_KEY, run_worker_segment
-from gar_backend.auth import require_api_key
 
 # Searches cwd and parents for `.env`; harmless if not present.
 load_dotenv()
