@@ -10,6 +10,8 @@ configuration env vars) is available before dependency providers run.
 from __future__ import annotations
 
 import asyncio
+import concurrent.futures
+from collections.abc import Coroutine
 from typing import Any
 
 from dotenv import load_dotenv
@@ -43,10 +45,24 @@ async def healthz() -> dict[str, str]:
 _asgi_handler = Mangum(app)
 
 
+def _run_isolated(coro: Coroutine[Any, Any, Any]) -> Any:
+    """Run a worker coroutine to completion on a private event loop in a
+    separate thread.
+
+    Calling ``asyncio.run`` on the main thread would set its current event
+    loop to ``None`` on exit; Mangum reuses the main thread's loop (via the
+    deprecated ``get_event_loop()``) across warm invocations, so the next HTTP
+    request on the same container would fail with "no current event loop".
+    Isolating the worker in its own thread leaves Mangum's loop untouched.
+    """
+    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+        return pool.submit(asyncio.run, coro).result()
+
+
 def handler(event: Any, context: Any) -> Any:
     if isinstance(event, dict) and WORKER_EVENT_KEY in event:
         job = event[WORKER_EVENT_KEY]
         run_id = job["run_id"]
-        state = asyncio.run(run_worker_segment(run_id, client=job.get("client")))
+        state = _run_isolated(run_worker_segment(run_id, client=job.get("client")))
         return {"ok": True, "run_id": run_id, "status": state.status.value}
     return _asgi_handler(event, context)
