@@ -11,6 +11,7 @@ dependencies = [
     "anthropic",
     "python-dotenv",
     "mcp>=1.27.2",
+    "boto3>=1.43.33",
 ]
 
 [project.scripts]
@@ -19,6 +20,7 @@ gar-mcp = "gar_backend.mcp_server.server:main"
 
 [dependency-groups]
 dev = [
+    "moto[dynamodb]>=5.2.2",
     "pytest",
     "pytest-asyncio",
     "ruff>=0.15.14",
