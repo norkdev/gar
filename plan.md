@@ -754,6 +754,31 @@ concrete reason D-201–D-203 exist.
   only at the report gate). Sessions require **retaining the final report** in the
   session record (or S3, referenced).
 
+### D-206: unified Cognito auth — M2M for machine clients, retire the API-key gate (v2.1, slice 5)
+
+v2.0's `X-GAR-API-Key` gate was the interim before identity. v2.1 makes **one**
+auth path: the backend verifies a **Cognito JWT** (issuer / JWKS / signature /
+`exp`) and builds `AccessContext` from its claims — for *both* human users
+(browser, later slice) and machine clients (MCP/CLI). Machine clients use the
+**OAuth2 client-credentials (M2M)** grant: a confidential Cognito app client
+(+ resource server + custom scope) exchanges `client_id`/`client_secret` at the
+token endpoint for a short-lived access token, sent as `Authorization: Bearer`.
+
+- **Why M2M over keeping the API key:** one authority issues all tokens, one
+  verification path (no bespoke key compare beside the JWT code), short-lived
+  creds, scope-attributable callers. The API-key gate is **removed**, not kept
+  as a second mechanism. Cost: a token-fetch step in the MCP/CLI client, and
+  Cognito resource-server/scope/app-client config.
+- **Disabled when unconfigured** (no `GAR_COGNITO_ISSUER`) → local dev + tests
+  run open with a default owner `AccessContext`, exactly like the key gate did.
+- **Slice-5 identity extraction:** `user_id = sub`, `tenant_id =
+  custom:tenant_id` claim or `default`, `role = owner`. An M2M token's `sub`
+  is its app-client id (no human principal).
+- **Deferred to slice 7 (sessions):** reconciling the M2M machine identity with
+  the browser user's `sub` so MCP-driven and browser-driven surveys share one
+  owner. Likely a configured `client_id → owner_user_id` mapping (single owner)
+  or an on-behalf claim. Doesn't bite until data is owner-scoped.
+
 ### Open tensions (decide at implementation time)
 
 - **Delete vs. audit retention.** Hard-delete (the privacy default) conflicts with the

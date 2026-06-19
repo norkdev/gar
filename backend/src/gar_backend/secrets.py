@@ -18,10 +18,6 @@ import os
 ANTHROPIC_SECRET_ARN_ENV = "GAR_ANTHROPIC_SECRET_ARN"
 ANTHROPIC_API_KEY_ENV = "ANTHROPIC_API_KEY"
 
-# App API key gating the HTTP boundary (see auth.py).
-API_KEY_ENV = "GAR_API_KEY"
-API_KEY_SECRET_ARN_ENV = "GAR_API_KEY_SECRET_ARN"
-
 
 def resolve_anthropic_api_key() -> str | None:
     """The Anthropic API key, or None to defer to the SDK's own env lookup."""
@@ -30,11 +26,6 @@ def resolve_anthropic_api_key() -> str | None:
         arn_var=ANTHROPIC_SECRET_ARN_ENV,
         json_key=ANTHROPIC_API_KEY_ENV,
     )
-
-
-def resolve_api_key() -> str | None:
-    """The app API key, or None when no key is configured (auth disabled)."""
-    return _resolve_secret(env_var=API_KEY_ENV, arn_var=API_KEY_SECRET_ARN_ENV)
 
 
 def _resolve_secret(

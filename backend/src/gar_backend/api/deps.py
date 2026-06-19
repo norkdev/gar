@@ -12,9 +12,10 @@ import os
 from pathlib import Path
 
 from anthropic import AsyncAnthropic
-from fastapi import Depends, Request
+from fastapi import Depends, HTTPException, Request
 
 from gar_backend.agent.llm import AnthropicLLM, BedrockLLM, LLMClient
+from gar_backend.api.auth import AuthError, bearer_token, get_verifier
 from gar_backend.governance.audit import (
     KNOWN_CLIENTS,
     AuditLogger,
@@ -144,10 +145,20 @@ def get_public_source() -> PublicSource:
     return _public_source
 
 
-def get_access_context() -> AccessContext:
-    """v1: single user, fixed default tenant + owner role.
+def get_access_context(request: Request) -> AccessContext:
+    """Identity from the verified Cognito token (D-203).
 
-    When auth is added (Phase 1+) this resolves the authenticated user's
-    tenant + role from the request context.
-    """
-    return AccessContext(tenant_id="default", role="owner")
+    When auth is disabled (no pool configured) returns a default-owner
+    context — local dev and tests. Otherwise requires a valid bearer token;
+    401 on a missing or invalid one. This is the single auth point: every
+    run/gate/stream route depends on it (see main.py)."""
+    verifier = get_verifier()
+    if verifier is None:
+        return AccessContext(tenant_id="default", user_id="local-owner", role="owner")
+    token = bearer_token(request)
+    if token is None:
+        raise HTTPException(status_code=401, detail="missing bearer token")
+    try:
+        return verifier.verify(token)
+    except AuthError as exc:
+        raise HTTPException(status_code=401, detail=f"invalid token: {exc}") from exc
