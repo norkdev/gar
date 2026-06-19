@@ -710,3 +710,21 @@ pre.report {
   word-break: break-all;
   margin: var(--sp-3) 0;
 }
+
+/* ------- Inline spinner (Processing view) ------- */
+.spinner {
+  display: inline-block;
+  width: 0.9em;
+  height: 0.9em;
+  vertical-align: -0.1em;
+  border: 2px solid var(--border, currentColor);
+  border-top-color: transparent;
+  border-radius: 50%;
+  animation: spinner-rotate 0.7s linear infinite;
+}
+
+@keyframes spinner-rotate {
+  to {
+    transform: rotate(360deg);
+  }
+}

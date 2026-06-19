@@ -1,13 +1,11 @@
 // Gate 1: review (and optionally edit) the derived concept, then approve.
-// After approval, the search phase runs server-side — we display live SSE
-// activity while it runs.
+// After approval the search phase runs server-side; App switches to the
+// Processing view, which polls until the next gate.
 
 import { useState } from "react";
 import { Stepper } from "../components/Stepper";
 import { approveConcept } from "../lib/api";
 import type { RunState } from "../lib/api";
-import { useRunStream } from "../lib/sse";
-import { Activity } from "./Activity";
 
 export function ConceptReview({
   state,
@@ -20,7 +18,6 @@ export function ConceptReview({
   const [draft, setDraft] = useState(initial);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
-  const { events } = useRunStream(busy ? state.run_id : null);
 
   const submit = async () => {
     setBusy(true);
@@ -57,7 +54,7 @@ export function ConceptReview({
       <div className="row" style={{ marginTop: "var(--sp-4)" }}>
         <button onClick={submit} disabled={busy}>
           {busy
-            ? "Searching related work…"
+            ? "Starting search…"
             : draft === initial
               ? "Approve & search"
               : "Approve edits & search"}
@@ -68,13 +65,6 @@ export function ConceptReview({
           </button>
         )}
       </div>
-
-      {busy && (
-        <Activity
-          events={events}
-          hint="Live activity from the agent — LLM calls and arXiv searches."
-        />
-      )}
     </main>
   );
 }

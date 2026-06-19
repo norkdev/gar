@@ -13,8 +13,6 @@ import { useMemo, useState } from "react";
 import { Stepper } from "../components/Stepper";
 import { candidateCompositeId, selectSources } from "../lib/api";
 import type { Candidate, Direction, RunState } from "../lib/api";
-import { useRunStream } from "../lib/sse";
-import { Activity } from "./Activity";
 
 const ABSTRACT_PREVIEW_CHARS = 280;
 const GROUP_PAGE = 8; // candidates shown per group before "show more"
@@ -57,7 +55,6 @@ export function SourceSelection({
   const [showAll, setShowAll] = useState<Set<number>>(new Set());
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
-  const { events } = useRunStream(busy ? state.run_id : null);
 
   const adoptedCount = adopted.size;
 
@@ -295,7 +292,7 @@ export function SourceSelection({
 
       <div className="row" style={{ marginTop: "var(--sp-5)" }}>
         <button onClick={submit} disabled={busy}>
-          {busy ? "Composing report…" : `Adopt ${adoptedCount} and compose report`}
+          {busy ? "Starting compose…" : `Adopt ${adoptedCount} and compose report`}
         </button>
         {!busy && adoptedCount === 0 && (
           <span className="muted">
@@ -303,13 +300,6 @@ export function SourceSelection({
           </span>
         )}
       </div>
-
-      {busy && (
-        <Activity
-          events={events}
-          hint="Composing the final report (1 LLM call, possibly 1 grounding-retry)."
-        />
-      )}
     </main>
   );
 }
