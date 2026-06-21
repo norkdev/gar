@@ -105,6 +105,12 @@ GAR_COGNITO_SCOPE=gar-api/access ./scripts/print-mcp-config.sh claude-desktop
 It only prints (and, with `--write`, drops the repo-local `.mcp.json`); it
 never edits your client's own config file.
 
+**Regenerate when the credentials change.** A cloud `.mcp.json` caches the M2M
+client secret + the Function URL. Both change if you rotate the Cognito client
+or destroy/recreate the stack — re-run the same command to refresh it (back up
+or remove the old file first; `--write` won't overwrite). `.mcp.json` and its
+backups (`.mcp.json.*`) are gitignored, so the secret never reaches git.
+
 ## Configuration
 
 All by environment variable:

@@ -30,8 +30,11 @@ audit*.jsonl
 .env.local
 .env.*.local
 
-# Local MCP client config (copy from .mcp.json.example); the example is tracked
+# Local MCP client config (copy from .mcp.json.example); the example is tracked.
+# Also ignore backups (.mcp.json.bak, etc.) — they may hold the M2M secret.
 .mcp.json
+.mcp.json.*
+!.mcp.json.example
 
 # Local-only design notes (kept out of the public repo)
 implementation_brief.md
