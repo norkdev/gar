@@ -131,11 +131,12 @@ curl -s -o /dev/null -w "runs no token:  %{http_code}\n" "$URL/runs"            
 curl -s -o /dev/null -w "runs w/ token:  %{http_code}\n" -H "Authorization: Bearer $TOKEN" "$URL/runs"  # 200
 ```
 
-## Custom domain (e.g. `https://gar.norkbb.net`)
+## Custom domain (e.g. `https://gar.example.com`)
 
-DNS lives at an external registrar (onamae.com), so validation + the alias
+DNS lives at an external registrar (not Route 53), so validation + the alias
 record are added there by hand; CDK only attaches the cert + alternate name to
-CloudFront. One-time cert setup, then a `-c`-parameterised deploy.
+CloudFront. One-time cert setup, then a `-c`-parameterised deploy. Substitute
+your own subdomain for `gar.example.com` throughout.
 
 **1. Request the cert in `us-east-1`** (CloudFront only accepts certs from that
 region, regardless of where the app runs):
@@ -143,20 +144,20 @@ region, regardless of where the app runs):
 ```bash
 eval "$(aws configure export-credentials --profile deploy --format env)"
 aws acm request-certificate --region us-east-1 \
-  --domain-name gar.norkbb.net --validation-method DNS \
+  --domain-name gar.example.com --validation-method DNS \
   --query CertificateArn --output text          # → save as CERT_ARN
 ```
 
-**2. Add the validation CNAME at onamae.com.** Read the record ACM wants:
+**2. Add the validation CNAME at your registrar.** Read the record ACM wants:
 
 ```bash
 aws acm describe-certificate --region us-east-1 --certificate-arn "$CERT_ARN" \
   --query 'Certificate.DomainValidationOptions[0].ResourceRecord' --output table
 ```
 
-In the onamae.com DNS panel add that `Name → Value` as a **CNAME** (strip the
-trailing dot; onamae appends the zone, so enter the host label only). Wait until
-the cert is `ISSUED` (minutes to a few hours):
+In the registrar's DNS panel add that `Name → Value` as a **CNAME** (strip the
+trailing dot; many panels append the zone automatically, so enter the host label
+only). Wait until the cert is `ISSUED` (minutes to a few hours):
 
 ```bash
 aws acm wait certificate-validated --region us-east-1 --certificate-arn "$CERT_ARN"
@@ -167,23 +168,23 @@ aws acm wait certificate-validated --region us-east-1 --certificate-arn "$CERT_A
 ```bash
 cd infra
 cdk deploy GarFrontendStack \
-  -c frontendDomain=gar.norkbb.net -c frontendCertArn="$CERT_ARN"
+  -c frontendDomain=gar.example.com -c frontendCertArn="$CERT_ARN"
 ```
 
-This adds `gar.norkbb.net` as a CloudFront alternate name, attaches the cert, and
+This adds `gar.example.com` as a CloudFront alternate name, attaches the cert, and
 registers the domain in the SPA's Cognito callback/logout URLs (the CloudFront
 name keeps working too). Note the stack's `SiteUrl` output.
 
-**4. Point the domain at CloudFront** — add the final CNAME at onamae.com:
+**4. Point the domain at CloudFront** — add the final CNAME at your registrar:
 
 ```
-gar.norkbb.net  CNAME  <distribution>.cloudfront.net   # from the DistributionUrl output
+gar.example.com  CNAME  <distribution>.cloudfront.net   # from the DistributionUrl output
 ```
 
-Apex domains (`norkbb.net` with no host) can't be a CNAME — use a subdomain like
+Apex domains (`example.com` with no host) can't be a CNAME — use a subdomain like
 `gar.` (as here), or front it with Route 53 / an ALIAS-capable provider.
 
-Once DNS propagates, `https://gar.norkbb.net` serves the SPA and OAuth login
+Once DNS propagates, `https://gar.example.com` serves the SPA and OAuth login
 round-trips on it. The cert is **independent of the stacks** — it survives a
 `cdk destroy`, so re-deploys only repeat step 3 (reuse the same `CERT_ARN`).
 Keep passing both `-c` flags on every `GarFrontendStack` deploy; omitting them

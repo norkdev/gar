@@ -814,10 +814,10 @@ version then *is* the product version with the multi-user dimension dormant.
 > are set it adds the alternate domain + ACM cert to the distribution and registers
 > the custom origin in the browser client's OAuth callback/logout URLs (the
 > CloudFront name still works). Cert is created + DNS-validated out of band (the
-> registrar is onamae.com, external) and survives `destroy`; re-deploys reuse the
-> same ARN. Full runbook: `docs/deploy.md` → "Custom domain". The design notes
-> below are retained for context. Apex (`norkbb.net` bare) can't CNAME — use a
-> subdomain (`gar.norkbb.net`) or a Route 53 / ALIAS-capable provider.
+> registrar is external, not Route 53) and survives `destroy`; re-deploys reuse
+> the same ARN. Full runbook: `docs/deploy.md` → "Custom domain". The design notes
+> below are retained for context. A bare apex (`example.com`) can't CNAME — use a
+> subdomain (`gar.example.com`) or a Route 53 / ALIAS-capable provider.
 
 
 
