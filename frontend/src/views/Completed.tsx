@@ -1,14 +1,27 @@
-// Terminal screen after gate 3 approval (or after a FAILED run).
+// Terminal screen after gate 3 approval (or a FAILED run). Also the view when
+// a completed session is opened from the session list — so it renders the
+// retained report (D-204) with copy / download.
 
+import { useState } from "react";
+import ReactMarkdown from "react-markdown";
+import rehypeRaw from "rehype-raw";
+import remarkGfm from "remark-gfm";
 import { Stepper } from "../components/Stepper";
 import type { RunState } from "../lib/api";
+import { downloadText, reportFilename } from "../lib/download";
 
 export function Completed({ state, onRestart }: { state: RunState; onRestart: () => void }) {
   const failed = state.status === "failed";
-  // saved_path is only set in vault mode (local CLI use); the picker /
-  // upload flow leaves saving to the client (Copy / Download buttons
-  // shown on the previous screen).
+  // saved_path is only set in vault mode (local CLI use).
   const hasSavedPath = Boolean(state.saved_path);
+  const report = (state.context.report as string | undefined) ?? "";
+  const [copied, setCopied] = useState(false);
+
+  const copy = async () => {
+    await navigator.clipboard.writeText(report);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1500);
+  };
 
   return (
     <main>
@@ -26,14 +39,36 @@ export function Completed({ state, onRestart }: { state: RunState; onRestart: ()
             runs will skip it.
           </p>
         </>
-      ) : (
+      ) : report ? (
         <>
-          <p>Report ready.</p>
-          <p className="muted">
-            The report was approved. If you used the Copy or Download button on the previous screen,
-            the Markdown is now in your hands — drop it into your vault wherever you like.
-          </p>
+          <div className="row" style={{ marginBottom: "var(--sp-3)" }}>
+            <button type="button" className="ghost" onClick={copy}>
+              {copied ? "Copied ✓" : "Copy"}
+            </button>
+            <button
+              type="button"
+              className="ghost"
+              onClick={() => downloadText(report, reportFilename())}
+            >
+              Download
+            </button>
+          </div>
+          <div className="report-rendered">
+            <ReactMarkdown
+              remarkPlugins={[remarkGfm]}
+              rehypePlugins={[rehypeRaw]}
+              components={{
+                a: ({ node: _node, ...props }) => (
+                  <a {...props} target="_blank" rel="noopener noreferrer" />
+                ),
+              }}
+            >
+              {report}
+            </ReactMarkdown>
+          </div>
         </>
+      ) : (
+        <p className="muted">The report was approved.</p>
       )}
 
       <div className="row" style={{ marginTop: "var(--sp-5)" }}>
