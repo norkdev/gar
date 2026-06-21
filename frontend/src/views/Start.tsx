@@ -193,7 +193,7 @@ export function Start({ onStarted }: { onStarted: (s: RunState) => void }) {
 
       {selected.length === 0 && (
         <p className="subtle" style={{ marginTop: "var(--sp-3)" }}>
-          v1 reads Markdown only. When you pick a folder, your browser asks to upload{" "}
+          This version reads Markdown only. When you pick a folder, your browser asks to upload{" "}
           <em>everything</em> in it — including hidden files like <code>.DS_Store</code>, so its
           count may be higher than your note count. GAR keeps only the <code>.md</code> files, and
           you'll see exactly which ones below before anything is sent.
