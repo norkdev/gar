@@ -414,12 +414,12 @@ wheels = [
 
 [[package]]
 name = "gar"
-version = "0.1.0"
+version = "2.1.0"
 source = { virtual = "." }
 
 [[package]]
 name = "gar-backend"
-version = "0.1.0"
+version = "2.1.0"
 source = { editable = "backend" }
 dependencies = [
     { name = "anthropic" },
@@ -466,7 +466,7 @@ dev = [
 
 [[package]]
 name = "gar-infra"
-version = "0.1.0"
+version = "2.1.0"
 source = { virtual = "infra" }
 dependencies = [
     { name = "aws-cdk-lib" },
