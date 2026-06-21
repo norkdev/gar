@@ -10,15 +10,19 @@ import { ConceptReview } from "./views/ConceptReview";
 import { FinalReport } from "./views/FinalReport";
 import { Login } from "./views/Login";
 import { Processing } from "./views/Processing";
+import { SessionList } from "./views/SessionList";
 import { SourceSelection } from "./views/SourceSelection";
 import { Start } from "./views/Start";
 
 type AuthPhase = "loading" | "anon" | "ready";
+type Home = "start" | "sessions";
 
 function App() {
   const [authPhase, setAuthPhase] = useState<AuthPhase>("loading");
   const [email, setEmail] = useState<string | null>(null);
   const [state, setState] = useState<RunState | null>(null);
+  // When no run is active, show the Start screen or the session list.
+  const [home, setHome] = useState<Home>("start");
 
   useEffect(() => {
     initAuth()
@@ -55,26 +59,42 @@ function App() {
     );
   }
 
+  const viewSessions = () => {
+    setState(null);
+    setHome("sessions");
+  };
+
+  let body;
+  if (state !== null) {
+    body = renderRun(state, setState);
+  } else if (home === "sessions") {
+    body = <SessionList onOpen={setState} onNew={() => setHome("start")} />;
+  } else {
+    body = <Start onStarted={setState} />;
+  }
+
   return (
     <>
       <ThemeToggle />
-      {email && (
-        <div className="auth-bar">
-          <span className="muted">{email}</span>
-          <button className="ghost" onClick={() => void logout()}>
-            Sign out
-          </button>
-        </div>
-      )}
-      {renderView(state, setState)}
+      <div className="auth-bar">
+        <button className="ghost" onClick={viewSessions}>
+          My sessions
+        </button>
+        {email && (
+          <>
+            <span className="muted">{email}</span>
+            <button className="ghost" onClick={() => void logout()}>
+              Sign out
+            </button>
+          </>
+        )}
+      </div>
+      {body}
     </>
   );
 }
 
-function renderView(state: RunState | null, setState: (s: RunState | null) => void) {
-  if (state === null) {
-    return <Start onStarted={setState} />;
-  }
+function renderRun(state: RunState, setState: (s: RunState | null) => void) {
   switch (state.status) {
     case "awaiting_concept_approval":
       return <ConceptReview state={state} onAdvanced={setState} />;

@@ -148,3 +148,44 @@ export function isInProgress(status: RunStatus): boolean {
 export function candidateCompositeId(c: Candidate): string {
   return `${c.source_name}:${c.external_id}`;
 }
+
+// ---- Sessions (the user's runs) ----
+
+/** Lean session summary returned by GET /runs (no report body / candidate pool). */
+export interface SessionSummary {
+  run_id: string;
+  tenant_id: string;
+  owner_user_id: string;
+  status: RunStatus;
+  concept: string | null;
+  has_report: boolean;
+  error: string | null;
+  updated_at: string;
+}
+
+export async function listRuns(): Promise<SessionSummary[]> {
+  const r = await fetch(await apiUrl("/runs"), { headers: apiHeaders() });
+  return jsonOrThrow<SessionSummary[]>(r);
+}
+
+export async function deleteRun(runId: string): Promise<void> {
+  const r = await fetch(await apiUrl(`/runs/${runId}`), {
+    method: "DELETE",
+    headers: apiHeaders(),
+  });
+  if (!r.ok) {
+    throw new Error(`${r.status} ${r.statusText}: ${await r.text()}`);
+  }
+}
+
+export interface ReportResponse {
+  run_id: string;
+  status: RunStatus;
+  report: string;
+  report_validation: Record<string, unknown> | null;
+}
+
+export async function getRunReport(runId: string): Promise<ReportResponse> {
+  const r = await fetch(await apiUrl(`/runs/${runId}/report`), { headers: apiHeaders() });
+  return jsonOrThrow<ReportResponse>(r);
+}
