@@ -674,10 +674,24 @@ pre.report {
 }
 
 /* ------- Theme toggle (top-right pill) ------- */
+/* Brand mascot, fixed in the top-right corner. Decorative — pointer-events
+   none so it never blocks the controls beneath it. */
+.brand-logo {
+  position: fixed;
+  top: var(--sp-3);
+  right: var(--sp-4);
+  height: clamp(48px, 7vw, 72px);
+  width: auto;
+  z-index: 5;
+  pointer-events: none;
+  user-select: none;
+}
+
+/* Theme toggle moved to the top-left to make room for the logo on the right. */
 .theme-toggle {
   position: fixed;
   top: var(--sp-4);
-  right: var(--sp-4);
+  left: var(--sp-4);
   background: var(--color-surface);
   border: 1px solid var(--color-border);
   border-radius: 999px;
@@ -737,7 +751,9 @@ pre.report {
   gap: var(--sp-3);
   max-width: var(--measure, 70ch);
   margin: 0 auto;
-  padding: var(--sp-2) 0;
+  /* Right padding keeps the buttons clear of the fixed corner logo when the
+     bar reaches the viewport edge on narrow screens. */
+  padding: var(--sp-2) 80px var(--sp-2) 0;
   font-size: var(--fs-sm);
 }
 

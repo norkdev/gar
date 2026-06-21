@@ -42,6 +42,7 @@ function App() {
     return (
       <>
         <ThemeToggle />
+        <img className="brand-logo" src="/gar.png" alt="GAR" />
         <main>
           <p className="muted">
             <span className="spinner" aria-hidden="true" /> Loading…
@@ -54,6 +55,7 @@ function App() {
     return (
       <>
         <ThemeToggle />
+        <img className="brand-logo" src="/gar.png" alt="GAR" />
         <Login onLogin={() => void login()} />
       </>
     );
@@ -76,6 +78,7 @@ function App() {
   return (
     <>
       <ThemeToggle />
+      <img className="brand-logo" src="/gar.png" alt="GAR" />
       <div className="auth-bar">
         <button className="ghost" onClick={viewSessions}>
           My sessions
