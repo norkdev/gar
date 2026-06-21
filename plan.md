@@ -804,3 +804,29 @@ the API boundary (#7), `AccessContext` built in one place, `RunStore` Protocol (
 durable-HITL state (#4), and the empty `Auth` CDK stack. Minimal v2 pays for **one extra
 field (`user_id` / `owner_user_id`) and one extra check axis** up front; the personal
 version then *is* the product version with the multi-user dimension dormant.
+
+---
+
+## 11. Custom domain for the frontend (future enhancement)
+
+The SPA is served from CloudFront's generated domain (`dXXXX.cloudfront.net`). That
+domain is **stable across in-place updates** but is **re-minted on every destroy →
+recreate** of `GarFrontendStack` — and a recreate also rotates the Cognito OAuth callback
+(CDK re-wires it automatically, so login keeps working, but the URL *value* changes each
+cycle). The random subdomain itself can't be pinned.
+
+To get a **permanent, branded URL that survives recreation**, point an owned domain
+(e.g. `gar.example.com`) at the distribution:
+
+- an **alternate domain name (CNAME / `domainNames`)** on the CloudFront distribution;
+- an **ACM certificate that must live in `us-east-1`** (CloudFront requirement, even
+  though the app runs in `ap-northeast-1`) — a cross-region cert, or a `DnsValidatedCertificate`
+  / a separate us-east-1 stack;
+- **DNS** pointing the domain at the distribution.
+
+Fully automatable in CDK when the domain is in **Route 53** (DNS-validated cert + A/AAAA
+alias records, all in the stack); with an external registrar, CDK does the cert + alias and
+the validation/app CNAMEs are added by hand. The custom domain also **stabilizes the
+browser OAuth callback** (FrontendStack's browser client `callback_urls` would use the
+fixed domain instead of the CloudFront one). Deferred 2026-06-21 — revisit when a domain is
+available; until then, **keep the stack up** (don't destroy it) to hold the current URL.
