@@ -32,7 +32,9 @@ def test_activity_returns_human_readable_lines(api_setup: dict[str, Any]) -> Non
     assert body["total"] >= 1
     assert len(body["items"]) == body["total"]
     assert any(it["text"] == "Reasoning about the next step" for it in body["items"])
-    assert all({"timestamp", "tool", "text", "status"} <= it.keys() for it in body["items"])
+    assert all(
+        {"timestamp", "tool", "text", "status"} <= it.keys() for it in body["items"]
+    )
 
 
 def test_activity_since_returns_only_new(api_setup: dict[str, Any]) -> None:

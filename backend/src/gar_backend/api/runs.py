@@ -206,7 +206,7 @@ def _activity_line(rec: dict[str, Any]) -> dict[str, Any]:
     elif tool.startswith("search_"):
         source = tool[len("search_") :].replace("_", " ") or "the literature"
         query = str(inp.get("query") or "").strip()
-        text = f"Searching {source}" + (f' for “{query[:60]}”' if query else "")
+        text = f"Searching {source}" + (f" for “{query[:60]}”" if query else "")
         count = out.get("result_count")
         if count is not None:
             text += f" — {count} result" + ("" if count == 1 else "s")
