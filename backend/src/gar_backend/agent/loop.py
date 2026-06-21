@@ -705,8 +705,10 @@ def _build_compose_user_text(
     instead of guessing file names (which compose otherwise never sees).
     """
     notes_block = (
-        "\n\nThe user's ORIGINAL IDEA NOTES (summarize these by content for "
-        f'the "Referenced idea notes" section, not by file name):\n{notes_text}'
+        "\n\nThe user's ORIGINAL IDEA NOTES, each headed by its file name "
+        '(--- <file> ---). For the "Referenced idea notes" section, give each '
+        "note's file name plus a summary of what it contributes:\n"
+        f"{notes_text}"
         if notes_text
         else ""
     )

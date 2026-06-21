@@ -541,10 +541,11 @@ def test_compose_user_text_includes_idea_notes_for_section_2() -> None:
         adopted_ids=[],
         notes_text="--- a.md ---\nlatency-bound speculative decoding",
     )
-    # The notes content reaches compose so section 2 summarizes substance,
-    # not a guessed file name.
+    # Both the note's content AND its file name reach compose, so section 2 can
+    # summarize the substance and cite where it came from.
     assert "ORIGINAL IDEA NOTES" in text
     assert "latency-bound speculative decoding" in text
+    assert "a.md" in text  # file name available for provenance
 
 
 def test_compose_user_text_omits_notes_block_when_empty() -> None:
