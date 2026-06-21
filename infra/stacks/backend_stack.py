@@ -78,7 +78,11 @@ class BackendStack(Stack):
             architecture=lambda_.Architecture.ARM_64,
             handler="gar_backend.main.handler",
             memory_size=1024,
-            timeout=Duration.seconds(30),
+            # 15 min: HTTP requests return in well under a second, but the async
+            # self-invoke worker (api/segments) runs a full survey segment
+            # (search / compose — LLM + arXiv), which exceeds 30s. One function,
+            # one timeout, sized for the long path.
+            timeout=Duration.minutes(15),
             environment={
                 "GAR_RUNS_TABLE": runs_table.table_name,
                 "GAR_STATE_BUCKET": state_bucket.bucket_name,
