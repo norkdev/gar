@@ -14,8 +14,11 @@
 # Config (all optional; defaults shown):
 #   GAR_API_URL=http://localhost:8000   backend REST base URL
 #   GAR_MCP_ROLE=public                 public | owner
-#   GAR_API_KEY=                        bearer token, if the backend wants one
 #   GAR_MCP_HEALTHCHECK=1               set to 0 to skip the startup probe
+# Cloud auth — Cognito M2M (unset for a local backend with auth disabled). The
+# client exchanges these for a short-lived bearer token; see docs/deploy.md:
+#   GAR_COGNITO_TOKEN_ENDPOINT  GAR_COGNITO_CLIENT_ID
+#   GAR_COGNITO_CLIENT_SECRET   GAR_COGNITO_SCOPE
 set -euo pipefail
 
 # Repo root = parent of this script's directory. Resolve symlinks.
