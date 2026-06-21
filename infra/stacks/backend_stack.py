@@ -71,6 +71,15 @@ class BackendStack(Stack):
             description="Anthropic API key for the GAR backend (set post-deploy)",
         )
 
+        # Voyage embeddings key for the opt-in semantic reranker + directions
+        # clustering. Placeholder until set post-deploy; resolved at cold start
+        # and hydrated into the env (secrets.hydrate_embed_key).
+        embed_secret = secretsmanager.Secret(
+            self,
+            "VoyageApiKey",
+            description="Voyage embeddings key for the GAR reranker (set post-deploy)",
+        )
+
         fn = lambda_.Function(
             self,
             "ApiFunction",
@@ -89,6 +98,9 @@ class BackendStack(Stack):
                 "GAR_AUDIT_BUCKET": state_bucket.bucket_name,  # durable audit log
                 "GAR_AUDIT_LOG_PATH": "/tmp/audit.jsonl",  # file-sink fallback
                 "GAR_ANTHROPIC_SECRET_ARN": anthropic_secret.secret_arn,
+                # Semantic reranker + directions clustering (Voyage embeddings).
+                "GAR_RERANKER": "embedding",
+                "GAR_EMBED_SECRET_ARN": embed_secret.secret_arn,
                 # Cognito JWT gate (api/auth): verify tokens from this pool that
                 # carry the API scope. Both app clients (M2M + browser) hold the
                 # scope, so the issuer + scope are the gate; client-id pinning is
@@ -118,6 +130,7 @@ class BackendStack(Stack):
         runs_table.grant_read_write_data(fn)  # table + its GSIs
         state_bucket.grant_read_write(fn)  # run-state pool + audit log
         anthropic_secret.grant_read(fn)
+        embed_secret.grant_read(fn)
 
         # Allow the function to invoke itself asynchronously to run a segment
         # off the request thread (api/segments.LambdaRunner). Scoped to this
@@ -155,3 +168,4 @@ class BackendStack(Stack):
         self.api_url = url.url  # consumed by FrontendStack's config.json
         CfnOutput(self, "ApiFunctionUrl", value=url.url)
         CfnOutput(self, "AnthropicSecretArn", value=anthropic_secret.secret_arn)
+        CfnOutput(self, "VoyageSecretArn", value=embed_secret.secret_arn)
