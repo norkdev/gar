@@ -7,9 +7,10 @@ from gar_backend.governance.audit import FileAuditSink, S3AuditSink
 
 @pytest.fixture(autouse=True)
 def _reset_singleton(monkeypatch: pytest.MonkeyPatch) -> None:
-    # get_audit_logger memoizes in a module global; clear it so each test
-    # re-runs the selection logic.
+    # Both the logger and the sink memoize in module globals; clear both so
+    # each test re-runs the selection logic.
     monkeypatch.setattr(deps, "_audit_logger", None)
+    monkeypatch.setattr(deps, "_audit_sink", None)
 
 
 def test_defaults_to_file_sink() -> None:

@@ -210,3 +210,31 @@ def test_for_client_shares_the_sink(tmp_path: Path) -> None:
     )
     lines = path.read_text().splitlines()
     assert [json.loads(line)["client"] for line in lines] == ["web", "cli"]
+
+
+def test_file_read_for_run_filters_and_orders(tmp_path: Path) -> None:
+    """read_for_run returns one run's records in file order, with the full
+    total, and only the tail past `since`."""
+    path = tmp_path / "audit.jsonl"
+    logger = AuditLogger(FileAuditSink(path))
+    for tool in ("a", "b", "c"):
+        logger.log(
+            AuditRecord(run_id="r1", tenant_id="default", tool_name=tool, input={})
+        )
+    logger.log(
+        AuditRecord(run_id="r2", tenant_id="default", tool_name="other", input={})
+    )
+
+    sink = FileAuditSink(path)
+    total, records = sink.read_for_run("default", "r1")
+    assert total == 3
+    assert [r["tool_name"] for r in records] == ["a", "b", "c"]
+
+    total, records = sink.read_for_run("default", "r1", since=2)
+    assert total == 3
+    assert [r["tool_name"] for r in records] == ["c"]
+
+
+def test_file_read_for_run_missing_file_is_empty(tmp_path: Path) -> None:
+    sink = FileAuditSink(tmp_path / "nope.jsonl")
+    assert sink.read_for_run("default", "r1") == (0, [])

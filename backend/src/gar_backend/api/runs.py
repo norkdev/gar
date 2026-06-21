@@ -20,6 +20,7 @@ from gar_backend.api.access import authorize_run
 from gar_backend.api.agent_wiring import build_agent_context, ideas_source_for_state
 from gar_backend.api.deps import (
     get_access_context,
+    get_audit_reader,
     get_client,
     get_llm_client,
     get_public_source,
@@ -27,7 +28,7 @@ from gar_backend.api.deps import (
     get_run_store,
 )
 from gar_backend.api.segments import SegmentRunner, get_segment_runner
-from gar_backend.governance.audit import AuditLogger, AuditRecord
+from gar_backend.governance.audit import AuditLogger, AuditReader, AuditRecord
 from gar_backend.governance.hitl import (
     RunState,
     RunStatus,
@@ -186,6 +187,64 @@ async def get_run_report_endpoint(
         "report": report,
         "report_validation": validation,
     }
+
+
+def _activity_line(rec: dict[str, Any]) -> dict[str, Any]:
+    """Turn one raw audit record into a human-readable activity line for the
+    progress feed. Reads only the safe, already-public fields (tool name, search
+    query, result counts) — never raw note content (the LLM records carry counts,
+    not the prompt). Kept source-generic: a search tool's display name is derived
+    from its tool_name, so a new public source needs no change here."""
+    tool = str(rec.get("tool_name") or "")
+    status = str(rec.get("status") or "ok")
+    out = rec.get("output") or {}
+    inp = rec.get("input") or {}
+    if status == "error":
+        text = f"Hit an error in {tool or 'a step'} — retrying or recovering"
+    elif tool == "llm.complete":
+        text = "Reasoning about the next step"
+    elif tool.startswith("search_"):
+        source = tool[len("search_") :].replace("_", " ") or "the literature"
+        query = str(inp.get("query") or "").strip()
+        text = f"Searching {source}" + (f' for “{query[:60]}”' if query else "")
+        count = out.get("result_count")
+        if count is not None:
+            text += f" — {count} result" + ("" if count == 1 else "s")
+    elif tool == "grounding.validate":
+        text = "Checking every claim is grounded in a cited source"
+    elif tool == "go_back":
+        text = "Stepped back to an earlier gate"
+    else:
+        text = tool or "Working"
+    return {
+        "timestamp": rec.get("timestamp"),
+        "tool": tool,
+        "text": text,
+        "status": status,
+    }
+
+
+@router.get("/{run_id}/activity")
+async def activity_endpoint(
+    run_id: str,
+    since: int = 0,
+    store: RunStore = Depends(get_run_store),
+    access: AccessContext = Depends(get_access_context),
+    reader: AuditReader | None = Depends(get_audit_reader),
+) -> dict[str, Any]:
+    """Progress feed for the Processing view (replaces the SSE feed, which can't
+    work behind the Function URL). Reads the run's audit trail — written
+    immediately as each action happens — and returns human-readable lines. The
+    client polls with ``since`` (how many it already has); we return the full
+    ``total`` plus only the new lines. 404 unless the caller owns the run."""
+    state = await store.get(run_id)
+    if state is None:
+        raise HTTPException(status_code=404, detail=f"Run {run_id} not found")
+    authorize_run(state, access)
+    if reader is None:
+        return {"total": 0, "items": []}
+    total, records = reader.read_for_run(state.tenant_id, run_id, since)
+    return {"total": total, "items": [_activity_line(r) for r in records]}
 
 
 # Which reverse transition applies at each gate (D-207). A status not here

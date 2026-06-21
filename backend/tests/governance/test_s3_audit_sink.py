@@ -64,6 +64,46 @@ def test_separate_runs_go_to_separate_prefixes(s3: Any) -> None:
     assert len(_objects(s3, "audit/t2/r2/")) == 1
 
 
+def test_read_for_run_returns_records_in_order(s3: Any) -> None:
+    sink = S3AuditSink(BUCKET, s3=s3)
+    for i in range(3):
+        sink.write(
+            {
+                "run_id": "r1",
+                "tenant_id": "default",
+                "tool_name": f"t{i}",
+                "timestamp": f"2026-01-01T00:00:0{i}+00:00",
+            }
+        )
+    sink.write({"run_id": "r2", "tenant_id": "default", "tool_name": "other"})
+
+    total, records = sink.read_for_run("default", "r1")
+    assert total == 3
+    assert [r["tool_name"] for r in records] == ["t0", "t1", "t2"]  # chronological
+
+
+def test_read_for_run_since_returns_only_new(s3: Any) -> None:
+    sink = S3AuditSink(BUCKET, s3=s3)
+    for i in range(4):
+        sink.write(
+            {
+                "run_id": "r1",
+                "tenant_id": "default",
+                "tool_name": f"t{i}",
+                "timestamp": f"2026-01-01T00:00:0{i}+00:00",
+            }
+        )
+    total, records = sink.read_for_run("default", "r1", since=2)
+    assert total == 4  # full count regardless of `since`
+    assert [r["tool_name"] for r in records] == ["t2", "t3"]
+
+
+def test_read_for_run_unknown_run_is_empty(s3: Any) -> None:
+    sink = S3AuditSink(BUCKET, s3=s3)
+    sink.write({"run_id": "r1", "tenant_id": "default", "tool_name": "a"})
+    assert sink.read_for_run("default", "nope") == (0, [])
+
+
 def test_through_audit_logger_stamps_schema_and_persists(s3: Any) -> None:
     logger = AuditLogger(S3AuditSink(BUCKET, s3=s3)).for_client("web")
     logger.log(

@@ -52,6 +52,17 @@ class AuditSink(Protocol):
     def write(self, payload: dict[str, Any]) -> None: ...
 
 
+class AuditReader(Protocol):
+    """A sink that can also read a run's records back, for the activity feed
+    (and, later, run replay). Returns ``(total, records[since:])`` in
+    chronological order — ``total`` is the full count so a polling client can
+    show a running tally while fetching only records it hasn't seen yet."""
+
+    def read_for_run(
+        self, tenant_id: str, run_id: str, since: int = 0
+    ) -> tuple[int, list[dict[str, Any]]]: ...
+
+
 class FileAuditSink:
     """Append-only JSONL writer to a local file. Thread-safe."""
 
@@ -63,6 +74,26 @@ class FileAuditSink:
         line = json.dumps(payload, ensure_ascii=False, default=str) + "\n"
         with self._lock, self._path.open("a", encoding="utf-8") as f:
             f.write(line)
+
+    def read_for_run(
+        self, tenant_id: str, run_id: str, since: int = 0
+    ) -> tuple[int, list[dict[str, Any]]]:
+        if not self._path.exists():
+            return 0, []
+        matching: list[dict[str, Any]] = []
+        with self._lock, self._path.open("r", encoding="utf-8") as f:
+            for line in f:
+                if not line.strip():
+                    continue
+                try:
+                    rec = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if rec.get("run_id") == run_id and (
+                    not tenant_id or rec.get("tenant_id") == tenant_id
+                ):
+                    matching.append(rec)
+        return len(matching), matching[since:]
 
 
 class S3AuditSink:
@@ -76,11 +107,10 @@ class S3AuditSink:
     across invocation boundaries, no cross-writer races.
 
     Keys are ``{prefix}/{tenant_id}/{run_id}/{timestamp}-{nonce}-{seq}.json``.
-    A reader reassembles a run's log by listing the ``{prefix}/{tenant}/{run}/``
-    prefix; chronological order comes from each record's own ``timestamp``
-    field (the key components only guarantee uniqueness). That reader — for the
-    SSE feed and run replay on Lambda — lands in a later slice; v2.0 needs the
-    durable write only.
+    ``read_for_run`` reassembles a run's log by listing the
+    ``{prefix}/{tenant}/{run}/`` prefix and sorting by key: the timestamp leads
+    the key, so lexicographic order is chronological (the nonce + seq only
+    break ties / guarantee uniqueness). Drives the polled activity feed.
 
     Thread-safe. boto3 is imported lazily (the Lambda runtime provides it; it is
     excluded from the deployment bundle).
@@ -124,6 +154,33 @@ class S3AuditSink:
             Body=body,
             ContentType="application/json",
         )
+
+    def read_for_run(
+        self, tenant_id: str, run_id: str, since: int = 0
+    ) -> tuple[int, list[dict[str, Any]]]:
+        prefix = f"{self._prefix}/{tenant_id or 'default'}/{run_id}/"
+        s3 = self._client()
+        keys: list[str] = []
+        token: str | None = None
+        while True:
+            kwargs: dict[str, Any] = {"Bucket": self._bucket, "Prefix": prefix}
+            if token:
+                kwargs["ContinuationToken"] = token
+            resp = s3.list_objects_v2(**kwargs)
+            keys.extend(obj["Key"] for obj in resp.get("Contents", []))
+            if not resp.get("IsTruncated"):
+                break
+            token = resp.get("NextContinuationToken")
+        keys.sort()  # timestamp leads the key → chronological
+        records: list[dict[str, Any]] = []
+        # Fetch only the keys past `since` — the client already has the rest.
+        for key in keys[since:]:
+            obj = s3.get_object(Bucket=self._bucket, Key=key)
+            try:
+                records.append(json.loads(obj["Body"].read()))
+            except json.JSONDecodeError:
+                continue
+        return len(keys), records
 
 
 class AuditLogger:
