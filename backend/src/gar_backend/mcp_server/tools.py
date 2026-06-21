@@ -283,18 +283,22 @@ def make_tools(client: GarApiClient) -> list[McpTool]:
     async def get_report(run_id: str) -> ReportResult:
         """Fetch the composed report (Markdown) plus its citation-validity
         summary. Persisting the report is the client's responsibility (D-105).
-        Available once the run reaches the report gate."""
+        Available at the report gate and afterward — a completed session keeps
+        its report (D-204)."""
         data = await client.get_run(run_id)
         status = data["status"]
-        payload = data.get("pending_payload", {})
-        markdown = payload.get("report")
+        # At the gate the report is in pending_payload; after completion it is
+        # retained in context (mirrors backend report_of).
+        pending = data.get("pending_payload") or {}
+        context = data.get("context") or {}
+        src = pending if "report" in pending else context
+        markdown = src.get("report")
         if markdown is None:
             raise GarApiError(
-                f"No report is available for run {run_id} (status={status}). A "
-                "report exists only at the report gate "
-                "(status=awaiting_report_approval); drive the run there first."
+                f"No report is available for run {run_id} (status={status}). "
+                "Drive the run to the report gate (or completion) first."
             )
-        summary = payload.get("report_validation")
+        summary = src.get("report_validation")
         citations_valid: bool | None = None
         warnings: list[str] = []
         if summary is not None:

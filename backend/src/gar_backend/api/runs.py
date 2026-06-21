@@ -28,7 +28,7 @@ from gar_backend.api.deps import (
 )
 from gar_backend.api.segments import SegmentRunner, get_segment_runner
 from gar_backend.governance.audit import AuditLogger
-from gar_backend.governance.hitl import RunState
+from gar_backend.governance.hitl import RunState, report_of
 from gar_backend.governance.rbac import AccessContext
 from gar_backend.sources.base import PublicSource
 from gar_backend.state.runs import RunStore
@@ -71,6 +71,23 @@ def serialize_state(state: RunState) -> dict[str, Any]:
         "context": state.context,
         "pending_payload": state.pending_payload,
         "adopted_source_ids": list(state.adopted_source_ids),
+        "error": state.error,
+        "updated_at": state.updated_at.isoformat(),
+    }
+
+
+def serialize_summary(state: RunState) -> dict[str, Any]:
+    """Lean projection for the session list (D-204): the concept and a
+    has-report flag, but not the report body or the candidate pool — so listing
+    many sessions stays light. Fetch one with GET /runs/{id} for the full state."""
+    report, _ = report_of(state)
+    return {
+        "run_id": state.run_id,
+        "tenant_id": state.tenant_id,
+        "owner_user_id": state.owner_user_id,
+        "status": state.status.value,
+        "concept": state.context.get("concept"),
+        "has_report": report is not None,
         "error": state.error,
         "updated_at": state.updated_at.isoformat(),
     }
@@ -142,6 +159,44 @@ async def get_run_endpoint(
     return serialize_state(state)
 
 
+@router.get("/{run_id}/report")
+async def get_run_report_endpoint(
+    run_id: str,
+    store: RunStore = Depends(get_run_store),
+    access: AccessContext = Depends(get_access_context),
+) -> dict[str, Any]:
+    """The composed report markdown + validation, at the gate or after
+    completion (D-204 — a session keeps its deliverable). 404 if none yet."""
+    state = await store.get(run_id)
+    if state is None:
+        raise HTTPException(status_code=404, detail=f"Run {run_id} not found")
+    authorize_run(state, access)
+    report, validation = report_of(state)
+    if report is None:
+        raise HTTPException(status_code=404, detail="No report for this run yet")
+    return {
+        "run_id": run_id,
+        "status": state.status.value,
+        "report": report,
+        "report_validation": validation,
+    }
+
+
+@router.delete("/{run_id}", status_code=204)
+async def delete_run_endpoint(
+    run_id: str,
+    store: RunStore = Depends(get_run_store),
+    access: AccessContext = Depends(get_access_context),
+) -> None:
+    """Delete a session — purge the run record + its S3 objects (D-204
+    right-to-be-forgotten). 404 unless the caller owns it."""
+    state = await store.get(run_id)
+    if state is None:
+        raise HTTPException(status_code=404, detail=f"Run {run_id} not found")
+    authorize_run(state, access)
+    await store.delete(run_id)
+
+
 @router.get("")
 async def list_runs_endpoint(
     store: RunStore = Depends(get_run_store),
@@ -150,4 +205,4 @@ async def list_runs_endpoint(
     # list_for_tenant enforces the isolation axis; filter the idea-privacy axis
     # (the caller's own runs) here. Sharing would relax this filter later.
     states = await store.list_for_tenant(access.tenant_id)
-    return [serialize_state(s) for s in states if s.owner_user_id == access.user_id]
+    return [serialize_summary(s) for s in states if s.owner_user_id == access.user_id]

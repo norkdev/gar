@@ -170,13 +170,36 @@ def request_report_approval(
 
 
 def approve_report(state: RunState) -> RunState:
-    """Gate 3 approval. The run is now COMPLETED."""
+    """Gate 3 approval. The run is now COMPLETED.
+
+    The report (+ its validation) moves from the transient ``pending_payload``
+    into ``context`` so it survives completion — a completed session keeps its
+    deliverable (D-204). Without this the report was dropped on approval and
+    ``get_report`` only worked at the gate.
+    """
     _require(state, RunStatus.AWAITING_REPORT_APPROVAL)
+    context = dict(state.context)
+    report, validation = report_of(state)
+    if report is not None:
+        context["report"] = report
+    if validation is not None:
+        context["report_validation"] = validation
     return _advance(
         state,
         status=RunStatus.COMPLETED,
+        context=context,
         pending_payload={},
     )
+
+
+def report_of(state: RunState) -> tuple[str | None, dict[str, Any] | None]:
+    """The report markdown + its validation summary, wherever they live.
+
+    At the report gate they are in ``pending_payload``; after approval they are
+    retained in ``context``. Returns ``(None, None)`` when the run has no report
+    yet. One reader for both the gate and the completed session."""
+    src = state.pending_payload if "report" in state.pending_payload else state.context
+    return src.get("report"), src.get("report_validation")
 
 
 def fail(state: RunState, *, error: str) -> RunState:

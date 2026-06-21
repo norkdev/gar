@@ -13,6 +13,7 @@ from gar_backend.governance.hitl import (
     fail,
     is_awaiting_user,
     is_terminal,
+    report_of,
     request_concept_approval,
     request_report_approval,
     request_source_selection,
@@ -257,3 +258,25 @@ def test_tenant_id_is_carried_through_transitions() -> None:
     state = request_source_selection(state, candidates=[])
     state = select_sources(state, adopted_source_ids=[])
     assert state.tenant_id == "acme-corp"
+
+
+# ---------- report retention (D-204) ----------
+
+
+def test_approve_report_retains_report_in_context() -> None:
+    gate = _drive_to(RunStatus.AWAITING_REPORT_APPROVAL)
+    assert gate.pending_payload["report"] == "x"  # at the gate, in pending
+    completed = approve_report(gate)
+    assert completed.status is RunStatus.COMPLETED
+    assert completed.pending_payload == {}  # transient payload cleared
+    assert completed.context["report"] == "x"  # but the deliverable survives
+
+
+def test_report_of_reads_gate_then_completed() -> None:
+    gate = _drive_to(RunStatus.AWAITING_REPORT_APPROVAL)
+    assert report_of(gate) == ("x", None)
+    assert report_of(approve_report(gate)) == ("x", None)
+
+
+def test_report_of_none_before_a_report_exists() -> None:
+    assert report_of(_drive_to(RunStatus.AWAITING_CONCEPT_APPROVAL)) == (None, None)

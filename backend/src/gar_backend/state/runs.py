@@ -24,6 +24,7 @@ class RunStore(Protocol):
     async def save(self, state: RunState) -> None: ...
     async def get(self, run_id: str) -> RunState | None: ...
     async def list_for_tenant(self, tenant_id: str) -> list[RunState]: ...
+    async def delete(self, run_id: str) -> None: ...
 
 
 class InMemoryRunStore:
@@ -48,6 +49,9 @@ class InMemoryRunStore:
             key=lambda s: s.updated_at,
             reverse=True,
         )
+
+    async def delete(self, run_id: str) -> None:
+        self._store.pop(run_id, None)
 
 
 # ---- DynamoDB-backed store (seam #3 — the AWS / v2 swap) ----
@@ -173,6 +177,50 @@ class DynamoDbRunStore:
             kwargs["ExclusiveStartKey"] = start
         # A list is summaries — don't fetch each run's pool back from S3.
         return [await self._hydrate(it, with_pool=False) for it in items]
+
+    async def delete(self, run_id: str) -> None:
+        """Right-to-be-forgotten (D-204): purge the run item plus its S3
+        objects — the offloaded candidate pool and the run's audit trail. (For
+        the personal product the audit log is owner-scoped, so deleting a
+        session purges its trace; a regulated deployment with a retention policy
+        would override this.) No-op if the run is already gone."""
+        resp = await asyncio.to_thread(self._table.get_item, Key={"run_id": run_id})
+        item = resp.get("Item")
+        if item is None:
+            return
+        await asyncio.to_thread(self._table.delete_item, Key={"run_id": run_id})
+        if not self._bucket:
+            return
+        tenant = item.get("tenant_id", "default")
+        keys: list[str] = []
+        pool_key = item.get(_POOL_ATTR)
+        if pool_key:
+            keys.append(pool_key)
+        keys += await self._list_keys(f"audit/{tenant}/{run_id}/")
+        if keys:
+            await asyncio.to_thread(self._delete_objects, keys)
+
+    async def _list_keys(self, prefix: str) -> list[str]:
+        s3 = self._s3_client()
+        keys: list[str] = []
+        token: str | None = None
+        while True:
+            kwargs: dict[str, Any] = {"Bucket": self._bucket, "Prefix": prefix}
+            if token:
+                kwargs["ContinuationToken"] = token
+            resp = await asyncio.to_thread(s3.list_objects_v2, **kwargs)
+            keys += [o["Key"] for o in resp.get("Contents", [])]
+            if not resp.get("IsTruncated"):
+                return keys
+            token = resp.get("NextContinuationToken")
+
+    def _delete_objects(self, keys: list[str]) -> None:
+        s3 = self._s3_client()
+        for i in range(0, len(keys), 1000):  # S3 delete_objects caps at 1000
+            s3.delete_objects(
+                Bucket=self._bucket,
+                Delete={"Objects": [{"Key": k} for k in keys[i : i + 1000]]},
+            )
 
     async def _hydrate(self, item: dict[str, Any], *, with_pool: bool) -> RunState:
         body = json.loads(item["state"])
