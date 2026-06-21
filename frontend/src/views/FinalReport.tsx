@@ -13,7 +13,7 @@ import ReactMarkdown from "react-markdown";
 import rehypeRaw from "rehype-raw";
 import remarkGfm from "remark-gfm";
 import { Stepper } from "../components/Stepper";
-import { approveReport } from "../lib/api";
+import { approveReport, goBack } from "../lib/api";
 import type { RunState } from "../lib/api";
 
 type Tab = "rendered" | "raw";
@@ -130,6 +130,26 @@ export function FinalReport({
     setTimeout(() => setCopied(false), 1500);
   };
 
+  const backToSources = async () => {
+    if (
+      !window.confirm(
+        "Go back to re-select sources? This report will be discarded and " +
+          "re-composed from your new selection (no new search).",
+      )
+    )
+      return;
+    setBusy(true);
+    setErr(null);
+    try {
+      const next = await goBack(state.run_id);
+      onCompleted(next); // back to the sources gate; App re-routes by status
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
   return (
     <main>
       <Stepper status={state.status} />
@@ -187,6 +207,9 @@ export function FinalReport({
       <div className="row" style={{ marginTop: "var(--sp-5)" }}>
         <button onClick={submit} disabled={busy}>
           {busy ? "Saving…" : "Approve & save…"}
+        </button>
+        <button type="button" className="secondary" onClick={backToSources} disabled={busy}>
+          ← Back to sources
         </button>
       </div>
     </main>

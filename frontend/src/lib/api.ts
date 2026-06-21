@@ -123,6 +123,16 @@ export async function approveReport(runId: string): Promise<RunState> {
   return jsonOrThrow<RunState>(r);
 }
 
+/** Step back one gate (D-207): from the sources gate → revise the concept;
+ *  from the report gate → re-select sources. Returns the new (earlier) state. */
+export async function goBack(runId: string): Promise<RunState> {
+  const r = await fetch(await apiUrl(`/runs/${runId}/back`), {
+    method: "POST",
+    headers: apiHeaders(),
+  });
+  return jsonOrThrow<RunState>(r);
+}
+
 // In-progress statuses: the agent is working a segment; the UI polls getRun
 // until it settles on a gate (awaiting_*) or a terminal status.
 const IN_PROGRESS: ReadonlySet<RunStatus> = new Set<RunStatus>([
