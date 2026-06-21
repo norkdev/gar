@@ -15,15 +15,20 @@ assume that profile resolves to `ap-northeast-1`.
 | `GarDataStack` | DynamoDB `gar-runs` (PK `run_id`, `tenant-index` GSI) · S3 state bucket (run-state pool + audit JSONL) — both `RemovalPolicy.DESTROY` |
 | `GarAuthStack` | Cognito User Pool · resource server (`gar-api`) + `access` scope · domain (OAuth token endpoint) · M2M app client (secret, client-credentials) |
 | `GarBackendStack` | Lambda (arm64, Mangum) · Function URL (`NONE` + CORS) · self-invoke IAM · Anthropic-key secret · **Cognito JWT gate** (verifies tokens from `GarAuthStack`) |
+| `GarFrontendStack` | S3 (private) + CloudFront (OAC) serving the SPA · browser Cognito app client (auth-code + PKCE) · runtime `config.json` |
 
-`GarWorkflowStack` / `GarFrontendStack` are still scaffolds. The `CDKToolkit`
-bootstrap stack is independent and is **not** removed by destroying the app
-stacks — no re-bootstrap needed on re-deploy.
+`GarWorkflowStack` is still a scaffold. The `CDKToolkit` bootstrap stack is
+independent and is **not** removed by destroying the app stacks — no
+re-bootstrap needed on re-deploy.
 
 ## Prerequisites
 
 - `uv sync --all-packages` done; CDK CLI installed (`npm i -g aws-cdk`).
 - **Docker running** — the Lambda asset is Docker-bundled (arm64).
+- **Frontend built** — `GarFrontendStack` deploys `frontend/dist`:
+  ```bash
+  (cd frontend && npm install && npm run build)
+  ```
 - Fresh `deploy` creds in the env (the profile's session is short-lived):
   ```bash
   eval "$(aws configure export-credentials --profile deploy --format env)"
@@ -32,13 +37,13 @@ stacks — no re-bootstrap needed on re-deploy.
 
 ## Deploy / re-deploy
 
-`GarBackendStack` depends on both `GarDataStack` and `GarAuthStack` (it imports
-their resources), so deploy all three; CDK orders them:
+The stacks import each other's resources (Backend ← Data + Auth; Frontend ←
+Auth + Backend), so deploy all four; CDK orders them:
 
 ```bash
 cd infra
 eval "$(aws configure export-credentials --profile deploy --format env)"
-cdk deploy GarDataStack GarAuthStack GarBackendStack --require-approval never
+cdk deploy GarDataStack GarAuthStack GarBackendStack GarFrontendStack --require-approval never
 ```
 
 Fetch a stack's outputs any time:
@@ -98,9 +103,20 @@ The client fetches a short-lived bearer token (client-credentials) and sends it
 as `Authorization: Bearer`. Unset all of these to go back to a local backend
 (auth disabled). See `docs/mcp.md`.
 
-**Frontend** — local dev needs nothing (the Vite proxy hits a local backend).
-Public browser hosting (Cognito Hosted UI login) is a later v2.1 slice — see
-`plan.md` D-205.
+**Browser** — the SPA is served from CloudFront (`DistributionUrl` output) and
+logs in via Cognito Hosted UI. Self-signup is disabled, so create a user first:
+
+```bash
+APP_URL=$(out GarFrontendStack DistributionUrl)
+aws cognito-idp admin-create-user --profile deploy --user-pool-id "$POOL_ID" \
+  --username you@example.com --user-attributes Name=email,Value=you@example.com Name=email_verified,Value=true
+aws cognito-idp admin-set-user-password --profile deploy --user-pool-id "$POOL_ID" \
+  --username you@example.com --password 'A-strong-passw0rd!' --permanent
+echo "Open: $APP_URL"
+```
+
+Local dev needs none of this — the Vite proxy hits a local backend with auth
+disabled, so the SPA skips login.
 
 ## Verify
 
@@ -120,7 +136,7 @@ curl -s -o /dev/null -w "runs w/ token:  %{http_code}\n" -H "Authorization: Bear
 ```bash
 cd infra
 eval "$(aws configure export-credentials --profile deploy --format env)"
-cdk destroy GarBackendStack GarAuthStack GarDataStack --force
+cdk destroy GarFrontendStack GarBackendStack GarAuthStack GarDataStack --force
 ```
 
 `auto_delete_objects` empties the S3 bucket first; the DynamoDB table and the

@@ -278,13 +278,15 @@ DynamoDB; the **audit log** is the same schema (`schema_version`) written to
 S3; **role-based access** still hides private-idea tools. The boundary
 **auth check** (seam #7) graduated from a stub to Cognito JWT verification.
 
-**Scope of v2.0:** single-tenant lift. Per-user **identity (Cognito)**,
-**sessions** (a persistent product surface), and **hosting the browser**
-publicly are v2.1 — the browser would otherwise need a weak shared-key-in-JS,
-so it waits for real per-user auth (the deliberate Option-C call; see
-`plan.md` §10). **Step Functions** orchestration and **per-tenant CMK** are
-v2.2. The **Bedrock** LLM is a wired seam (`GAR_LLM_PROVIDER`), not an
-implementation.
+**Scope of v2.0:** single-tenant lift. **v2.1** then added per-user **identity
+(Cognito)** — JWT verification for browser users and OAuth2 client-credentials
+(M2M) for the MCP/CLI, one verification path (D-206) — **owner-scoped data** (a
+two-axis tenant/owner check, D-202), **sessions** (retain / download / delete,
+D-204), and **public browser hosting** (S3 + CloudFront + Cognito Hosted-UI
+login). The browser waited for real per-user auth rather than shipping a weak
+shared-key-in-JS (the deliberate Option-C call; see `plan.md` §10). **Step
+Functions** orchestration and **per-tenant CMK** are v2.2. The **Bedrock** LLM
+is a wired seam (`GAR_LLM_PROVIDER`), not an implementation.
 
 Verified end-to-end against the live deployment: a governed survey driven
 through the **MCP client** (and via SigV4-signed HTTP before the key gate
@@ -691,17 +693,19 @@ backend/src/gar_backend/
     └── models.py       Pydantic I/O shared with the API
 
 frontend/src/
-├── App.tsx             status-driven view router
+├── App.tsx             auth gate + status-driven view router
 ├── lib/
 │   ├── api.ts          typed fetch wrappers
-│   ├── config.ts       base URL + API key (VITE_GAR_API_URL / _API_KEY)
+│   ├── config.ts       base URL (runtime config) + Cognito bearer header
+│   ├── runtimeConfig.ts fetch /config.json (local → no-auth fallback)
+│   ├── auth.ts         Cognito login (oidc-client-ts, auth-code + PKCE)
 │   └── poll.ts         useRunProgress hook (polls until the next gate)
-└── views/              Start / ConceptReview / SourceSelection /
+└── views/              Login / Start / ConceptReview / SourceSelection /
                         FinalReport / Completed / Processing (polling)
 
-infra/                  AWS CDK (Python) — Data + Auth + Backend deployed;
-                        Workflow / Frontend scaffolds (see docs/deploy.md)
-backend/tests/          403 tests, mirrors src/ layout
+infra/                  AWS CDK (Python) — Data + Auth + Backend + Frontend deployed;
+                        Workflow scaffold (see docs/deploy.md)
+backend/tests/          426 tests, mirrors src/ layout
 spec.md                 Working spec (Japanese)
 CLAUDE.md               Notes for Claude Code working in this repo
 ```
