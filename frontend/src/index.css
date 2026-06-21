@@ -728,3 +728,15 @@ pre.report {
     transform: rotate(360deg);
   }
 }
+
+/* ------- Auth bar (signed-in user + sign out) ------- */
+.auth-bar {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--sp-3);
+  max-width: var(--measure, 70ch);
+  margin: 0 auto;
+  padding: var(--sp-2) 0;
+  font-size: var(--fs-sm);
+}

@@ -1,21 +1,63 @@
-// Top-level router. Picks a view based on the run's current status.
+// Top-level router. Gates the app behind Cognito login (when configured), then
+// picks a view based on the run's current status.
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { ThemeToggle } from "./components/ThemeToggle";
 import { isInProgress, type RunState } from "./lib/api";
+import { initAuth, isAuthenticated, login, logout, userEmail } from "./lib/auth";
 import { Completed } from "./views/Completed";
 import { ConceptReview } from "./views/ConceptReview";
 import { FinalReport } from "./views/FinalReport";
+import { Login } from "./views/Login";
 import { Processing } from "./views/Processing";
 import { SourceSelection } from "./views/SourceSelection";
 import { Start } from "./views/Start";
 
+type AuthPhase = "loading" | "anon" | "ready";
+
 function App() {
+  const [authPhase, setAuthPhase] = useState<AuthPhase>("loading");
+  const [email, setEmail] = useState<string | null>(null);
   const [state, setState] = useState<RunState | null>(null);
+
+  useEffect(() => {
+    initAuth()
+      .then(({ authEnabled }) => {
+        // No pool configured (local dev) → open; otherwise require a session.
+        if (!authEnabled || isAuthenticated()) {
+          setEmail(userEmail());
+          setAuthPhase("ready");
+        } else {
+          setAuthPhase("anon");
+        }
+      })
+      .catch(() => setAuthPhase("anon"));
+  }, []);
+
+  if (authPhase === "loading") {
+    return (
+      <main>
+        <p className="muted">
+          <span className="spinner" aria-hidden="true" /> Loading…
+        </p>
+      </main>
+    );
+  }
+  if (authPhase === "anon") {
+    return <Login onLogin={() => void login()} />;
+  }
 
   return (
     <>
       <ThemeToggle />
+      {email && (
+        <div className="auth-bar">
+          <span className="muted">{email}</span>
+          <button className="ghost" onClick={() => void logout()}>
+            Sign out
+          </button>
+        </div>
+      )}
       {renderView(state, setState)}
     </>
   );

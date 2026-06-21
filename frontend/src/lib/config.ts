@@ -1,23 +1,24 @@
-// Backend connection config: base URL + API key.
+// Backend connection: base URL from runtime config, bearer token from auth.
 //
 // Empty base URL → same-origin: the Vite dev server proxies /runs/* to a local
-// backend, and a CloudFront-hosted build can route /runs/* to the Function URL
-// on the same origin. Set VITE_GAR_API_URL (+ VITE_GAR_API_KEY) to point a
-// build directly at the cloud Function URL instead.
+// backend (auth disabled). In the cloud, config.json carries the Function URL
+// and the request is authenticated with the Cognito access token.
 
-export const API_BASE = (import.meta.env.VITE_GAR_API_URL ?? "").replace(/\/+$/, "");
-export const API_KEY = import.meta.env.VITE_GAR_API_KEY;
+import { accessToken } from "./auth";
+import { loadConfig } from "./runtimeConfig";
 
-export function apiUrl(path: string): string {
-  return API_BASE + path;
+export async function apiUrl(path: string): Promise<string> {
+  const { apiUrl } = await loadConfig();
+  return apiUrl.replace(/\/+$/, "") + path;
 }
 
 // Headers for every backend call: identify the surface (audit attribution) and,
-// when configured, the API key the backend gate checks. `json` adds the
-// Content-Type for request bodies.
+// when signed in, the Cognito bearer token the backend gate verifies. `json`
+// adds the Content-Type for request bodies.
 export function apiHeaders(opts?: { json?: boolean }): Record<string, string> {
   const headers: Record<string, string> = { "X-GAR-Client": "web" };
   if (opts?.json) headers["Content-Type"] = "application/json";
-  if (API_KEY) headers["X-GAR-API-Key"] = API_KEY;
+  const token = accessToken();
+  if (token) headers["Authorization"] = `Bearer ${token}`;
   return headers;
 }

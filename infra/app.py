@@ -29,6 +29,7 @@ FrontendStack(
     "GarFrontendStack",
     user_pool=auth.user_pool,
     issuer=auth.issuer,
+    hosted_ui_domain=auth.hosted_ui_domain,
     api_url=backend.api_url,
 )
 

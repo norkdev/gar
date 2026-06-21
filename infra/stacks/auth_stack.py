@@ -72,6 +72,7 @@ class AuthStack(Stack):
         )
         self.m2m_client = m2m_client
         self.api_scope = API_SCOPE
+        self.hosted_ui_domain = domain.base_url()  # https://{prefix}.auth.{region}...
 
         CfnOutput(self, "UserPoolId", value=pool.user_pool_id)
         CfnOutput(self, "Issuer", value=self.issuer)

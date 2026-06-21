@@ -34,6 +34,7 @@ class FrontendStack(Stack):
         *,
         user_pool: cognito.IUserPool,
         issuer: str,
+        hosted_ui_domain: str,
         api_url: str,
         **kwargs: object,
     ) -> None:
@@ -84,6 +85,7 @@ class FrontendStack(Stack):
                 flows=cognito.OAuthFlows(authorization_code_grant=True),
                 scopes=[
                     cognito.OAuthScope.OPENID,
+                    cognito.OAuthScope.EMAIL,
                     cognito.OAuthScope.custom(API_SCOPE),
                 ],
                 callback_urls=[origin, f"{origin}/"],
@@ -112,8 +114,9 @@ class FrontendStack(Stack):
                         "apiUrl": api_url,
                         "cognito": {
                             "authority": issuer,
+                            "hostedUiDomain": hosted_ui_domain,
                             "clientId": browser_client.user_pool_client_id,
-                            "scope": f"openid {API_SCOPE}",
+                            "scope": f"openid email {API_SCOPE}",
                         },
                     },
                 ),
