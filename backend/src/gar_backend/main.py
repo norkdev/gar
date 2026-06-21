@@ -21,9 +21,14 @@ from mangum import Mangum
 from gar_backend.api import gates, runs, stream
 from gar_backend.api.deps import get_access_context
 from gar_backend.api.segments import WORKER_EVENT_KEY, run_worker_segment
+from gar_backend.secrets import hydrate_embed_key
 
 # Searches cwd and parents for `.env`; harmless if not present.
 load_dotenv()
+
+# If the embedding reranker is configured via a secret (Lambda), put the key in
+# the env now so make_reranker picks it up when an AgentContext is built.
+hydrate_embed_key()
 
 
 app = FastAPI(title="gar-backend", version="0.1.0")
