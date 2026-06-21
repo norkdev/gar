@@ -789,6 +789,13 @@ token endpoint for a short-lived access token, sent as `Authorization: Bearer`.
 - **Data residency** tightens via existing seams: the `LLMClient → Bedrock` swap is also a
   residency lever (inference in-account/region), and per-tenant CMK isolates at rest.
 - **Cache side channel** (D-201 caveat) — resolve when the persistent cache is built.
+- **Delete-during-flight race (slice 7, known edge).** `DELETE /runs/{id}` purges the
+  record, but a run whose async worker is mid-segment can be **re-created** by the
+  worker's next `store.save()` — or the delete wins the `store.get()` and the worker
+  aborts with "Unknown run". Nondeterministic. Harmless for the normal path (sessions
+  are deleted once completed), so left as-is in v2.1. To make it airtight: a `deleted`
+  tombstone status the worker checks before saving, or a conditional `put_item`
+  (attribute_not_exists / version guard) so a purge can't be undone by an in-flight save.
 
 ### Why this is expansion, not a rewrite
 
