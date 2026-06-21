@@ -27,8 +27,14 @@ from gar_backend.api.deps import (
     get_run_store,
 )
 from gar_backend.api.segments import SegmentRunner, get_segment_runner
-from gar_backend.governance.audit import AuditLogger
-from gar_backend.governance.hitl import RunState, report_of
+from gar_backend.governance.audit import AuditLogger, AuditRecord
+from gar_backend.governance.hitl import (
+    RunState,
+    RunStatus,
+    report_of,
+    revise_concept,
+    revise_sources,
+)
 from gar_backend.governance.rbac import AccessContext
 from gar_backend.sources.base import PublicSource
 from gar_backend.state.runs import RunStore
@@ -180,6 +186,47 @@ async def get_run_report_endpoint(
         "report": report,
         "report_validation": validation,
     }
+
+
+# Which reverse transition applies at each gate (D-207). A status not here
+# can't go back (the concept gate's "back" is just abandoning the run).
+_BACK_TRANSITIONS = {
+    RunStatus.AWAITING_SOURCE_SELECTION: revise_concept,  # → concept gate
+    RunStatus.AWAITING_REPORT_APPROVAL: revise_sources,  # → sources gate
+}
+
+
+@router.post("/{run_id}/back")
+async def back_endpoint(
+    run_id: str,
+    store: RunStore = Depends(get_run_store),
+    access: AccessContext = Depends(get_access_context),
+    audit: AuditLogger = Depends(get_request_audit_logger),
+) -> dict[str, Any]:
+    """Step back one gate (D-207): from the sources gate to revise the concept,
+    or from the report gate to re-select sources. 409 if the run is not at a
+    gate that can go back. A pure transition — no agent segment runs here; the
+    forward re-run happens when the human re-approves the gate."""
+    state = await store.get(run_id)
+    if state is None:
+        raise HTTPException(status_code=404, detail=f"Run {run_id} not found")
+    authorize_run(state, access)
+    transition = _BACK_TRANSITIONS.get(state.status)
+    if transition is None:
+        raise HTTPException(
+            status_code=409, detail=f"Cannot go back from status {state.status.value}"
+        )
+    new_state = transition(state)
+    await store.save(new_state)
+    audit.log(
+        AuditRecord(
+            run_id=run_id,
+            tenant_id=state.tenant_id,
+            tool_name="go_back",
+            input={"from": state.status.value, "to": new_state.status.value},
+        )
+    )
+    return serialize_state(new_state)
 
 
 @router.delete("/{run_id}", status_code=204)

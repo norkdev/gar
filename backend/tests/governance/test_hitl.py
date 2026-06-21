@@ -17,6 +17,8 @@ from gar_backend.governance.hitl import (
     request_concept_approval,
     request_report_approval,
     request_source_selection,
+    revise_concept,
+    revise_sources,
     select_sources,
     start,
 )
@@ -121,7 +123,8 @@ def test_select_sources_records_adopted_and_moves_to_evaluating() -> None:
     state = select_sources(state, adopted_source_ids=["2301.1"])
     assert state.status is RunStatus.EVALUATING
     assert state.adopted_source_ids == ("2301.1",)
-    assert state.pending_payload == {}
+    # The full pool is retained (for revise_sources / back), not dropped (D-207).
+    assert state.pending_payload == {"candidates": []}
 
 
 def test_select_sources_carries_adopted_records_into_context() -> None:
@@ -280,3 +283,59 @@ def test_report_of_reads_gate_then_completed() -> None:
 
 def test_report_of_none_before_a_report_exists() -> None:
     assert report_of(_drive_to(RunStatus.AWAITING_CONCEPT_APPROVAL)) == (None, None)
+
+
+# ---------- back-navigation (D-207) ----------
+
+
+def _sources_gate_with_pool() -> tuple[RunState, list]:
+    state = start("r1", "default")
+    state = request_concept_approval(state, concept="c")
+    state = approve_concept(state)
+    cands = [
+        {"source_name": "arxiv", "external_id": "1", "title": "P1"},
+        {"source_name": "arxiv", "external_id": "2", "title": "P2"},
+    ]
+    state = request_source_selection(state, candidates=cands)
+    return state, cands
+
+
+def test_pool_retained_through_report_gate_then_dropped() -> None:
+    state, cands = _sources_gate_with_pool()
+    state = select_sources(state, adopted_source_ids=["arxiv:1"])
+    assert state.pending_payload["candidates"] == cands  # retained at EVALUATING
+    state = request_report_approval(state, report="# R")
+    assert state.pending_payload["candidates"] == cands  # retained at the report gate
+    assert state.pending_payload["report"] == "# R"
+    state = approve_report(state)
+    assert "candidates" not in state.pending_payload  # dropped on completion
+    assert state.context["report"] == "# R"  # report kept (light session)
+
+
+def test_revise_concept_reopens_concept_and_clears_search() -> None:
+    state, _ = _sources_gate_with_pool()
+    state = dataclasses.replace(
+        state, context={**state.context, "directions": [{"id": 0}]}
+    )
+    back = revise_concept(state)
+    assert back.status is RunStatus.AWAITING_CONCEPT_APPROVAL
+    assert back.pending_payload == {"concept": "c"}
+    assert "directions" not in back.context  # search artifacts cleared
+    assert "adopted_evidence" not in back.context
+    assert back.adopted_source_ids == ()
+
+
+def test_revise_sources_restores_pool_and_drops_report() -> None:
+    state, cands = _sources_gate_with_pool()
+    state = select_sources(state, adopted_source_ids=["arxiv:1"])
+    state = request_report_approval(state, report="# R")
+    back = revise_sources(state)
+    assert back.status is RunStatus.AWAITING_SOURCE_SELECTION
+    assert back.pending_payload == {"candidates": cands}  # same papers, report gone
+
+
+def test_revise_from_wrong_state_raises() -> None:
+    with pytest.raises(InvalidTransition):
+        revise_concept(start("r1", "default"))
+    with pytest.raises(InvalidTransition):
+        revise_sources(start("r1", "default"))

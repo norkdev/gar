@@ -223,6 +223,9 @@ class GarApiClient:
     async def gate_report(self, run_id: str) -> dict[str, Any]:
         return await self._request("POST", f"/runs/{run_id}/gates/report")
 
+    async def go_back(self, run_id: str) -> dict[str, Any]:
+        return await self._request("POST", f"/runs/{run_id}/back")
+
 
 def _format_http_error(method: str, path: str, resp: httpx.Response) -> str:
     detail: str | None
