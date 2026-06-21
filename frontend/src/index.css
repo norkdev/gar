@@ -33,6 +33,7 @@ body {
 
 /* ------- Layout ------- */
 main {
+  position: relative; /* positioning context for the corner brand logo */
   max-width: 920px;
   margin: var(--sp-6) auto var(--sp-7);
   padding: var(--sp-6) var(--sp-7);
@@ -674,24 +675,30 @@ pre.report {
 }
 
 /* ------- Theme toggle (top-right pill) ------- */
-/* Brand mascot, fixed in the top-right corner. Decorative — pointer-events
-   none so it never blocks the controls beneath it. */
+/* Brand mascot, anchored to the top-right corner of the card it sits in (its
+   `main` is position:relative). Decorative — pointer-events none. The card
+   reserves space for it via `.has-corner-logo` so it never overlaps text. */
 .brand-logo {
-  position: fixed;
-  top: var(--sp-3);
-  right: var(--sp-4);
-  height: clamp(48px, 7vw, 72px);
+  position: absolute;
+  top: var(--sp-5);
+  right: var(--sp-5);
+  height: clamp(96px, 13vw, 144px);
   width: auto;
-  z-index: 5;
   pointer-events: none;
   user-select: none;
 }
 
-/* Theme toggle moved to the top-left to make room for the logo on the right. */
+/* Title + intro keep clear of the corner logo (only the top of the card is in
+   the logo's band; lower sections sit below it and need no padding). */
+.has-corner-logo > h1:first-child,
+.has-corner-logo > p:first-of-type {
+  padding-right: clamp(112px, 15vw, 168px);
+}
+
 .theme-toggle {
   position: fixed;
   top: var(--sp-4);
-  left: var(--sp-4);
+  right: var(--sp-4);
   background: var(--color-surface);
   border: 1px solid var(--color-border);
   border-radius: 999px;
@@ -751,9 +758,7 @@ pre.report {
   gap: var(--sp-3);
   max-width: var(--measure, 70ch);
   margin: 0 auto;
-  /* Right padding keeps the buttons clear of the fixed corner logo when the
-     bar reaches the viewport edge on narrow screens. */
-  padding: var(--sp-2) 80px var(--sp-2) 0;
+  padding: var(--sp-2) 0;
   font-size: var(--fs-sm);
 }
 
