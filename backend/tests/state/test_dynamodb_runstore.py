@@ -186,3 +186,23 @@ async def test_no_candidates_means_no_s3_object(store_s3: DynamoDbRunStore) -> N
     assert "candidates_key" not in _raw_item("r2")  # nothing offloaded
     got = await store_s3.get("r2")
     assert got is not None and got.pending_payload == {"report": "# Report"}
+
+
+async def test_delete_purges_item_pool_and_audit(store_s3: DynamoDbRunStore) -> None:
+    await store_s3.save(_state())  # r1 (tenant "default"), candidates → S3 pool
+    s3 = boto3.client("s3", region_name="ap-northeast-1")
+    s3.put_object(Bucket=BUCKET, Key="audit/default/r1/a.json", Body=b"{}")
+    s3.put_object(Bucket=BUCKET, Key="audit/default/r1/b.json", Body=b"{}")
+
+    await store_s3.delete("r1")
+
+    assert await store_s3.get("r1") is None
+    pool = s3.list_objects_v2(Bucket=BUCKET, Prefix="default/r1/").get("Contents", [])
+    audit = s3.list_objects_v2(Bucket=BUCKET, Prefix="audit/default/r1/").get(
+        "Contents", []
+    )
+    assert pool == [] and audit == []  # right-to-be-forgotten (D-204)
+
+
+async def test_delete_unknown_run_is_noop(store_s3: DynamoDbRunStore) -> None:
+    await store_s3.delete("nope")  # no raise, nothing to purge

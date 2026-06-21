@@ -434,3 +434,20 @@ async def test_backend_error_propagates_through_tool() -> None:
         await tools["select_sources"].fn(run_id="r1", adopted_ids=["arxiv:1"])
     assert "not in the right state" in str(ei.value)
     await client.aclose()
+
+
+async def test_get_report_reads_completed_run_from_context() -> None:
+    """After completion the report is retained in context (D-204), not in
+    pending_payload — get_report must still find it."""
+    data = {
+        "run_id": "r1",
+        "status": "completed",
+        "pending_payload": {},
+        "context": {"concept": "c", "report": "# Final Survey"},
+    }
+    client = make_client(constant_handler(data))
+    tools = tools_by_name(client)
+    out = await tools["get_report"].fn(run_id="r1")
+    assert out.markdown == "# Final Survey"
+    assert out.status == "completed"
+    await client.aclose()

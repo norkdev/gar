@@ -653,7 +653,7 @@ backend/src/gar_backend/
 ├── main.py             FastAPI app + Mangum handler (HTTP + async worker event)
 ├── secrets.py          resolve the Anthropic key (env or Secrets Manager)
 ├── api/                HTTP layer
-│   ├── runs.py         POST /runs, GET /runs, GET /runs/{id}
+│   ├── runs.py         POST /runs · GET /runs · GET/DELETE /runs/{id} · /report
 │   ├── gates.py        POST /runs/{id}/gates/{concept,sources,report}
 │   ├── stream.py       GET /runs/{id}/events  (SSE; unused by the v2 browser)
 │   ├── segments.py     run a segment off the request (in-process / Lambda self-invoke)
