@@ -92,6 +92,16 @@ hand-edit it:
 ./scripts/print-mcp-config.sh claude-desktop  # absolute path, to paste into Desktop
 ```
 
+For the **cloud** backend, set `GAR_API_URL` + the `GAR_COGNITO_*` vars in the
+environment first and the helper includes them in the printed config (omit them
+for a local backend):
+
+```bash
+GAR_API_URL=<ApiFunctionUrl> GAR_COGNITO_TOKEN_ENDPOINT=<TokenEndpoint> \
+GAR_COGNITO_CLIENT_ID=<M2mClientId> GAR_COGNITO_CLIENT_SECRET=<secret> \
+GAR_COGNITO_SCOPE=gar-api/access ./scripts/print-mcp-config.sh claude-desktop
+```
+
 It only prints (and, with `--write`, drops the repo-local `.mcp.json`); it
 never edits your client's own config file.
 

@@ -15,8 +15,14 @@
 # repo-local .mcp.json, which is ours to own.
 #
 # Env overrides (defaults shown):
-#   GAR_API_URL=http://localhost:8000
-#   GAR_MCP_ROLE=public
+#   GAR_API_URL=http://localhost:8000   GAR_MCP_ROLE=public
+# For the cloud backend, also set the Cognito M2M creds — they're then included
+# in the printed config (omit them for a local backend with auth disabled):
+#   GAR_COGNITO_TOKEN_ENDPOINT  GAR_COGNITO_CLIENT_ID
+#   GAR_COGNITO_CLIENT_SECRET   GAR_COGNITO_SCOPE   (default gar-api/access)
+# e.g.  GAR_API_URL=https://…lambda-url…/ GAR_COGNITO_CLIENT_ID=… \
+#       GAR_COGNITO_CLIENT_SECRET=… GAR_COGNITO_TOKEN_ENDPOINT=…/oauth2/token \
+#       ./scripts/print-mcp-config.sh claude-desktop
 set -euo pipefail
 
 usage() {
@@ -50,6 +56,29 @@ else
   command_path="./scripts/gar-mcp.sh"
 fi
 
+# Always pass the base URL + role; add the Cognito M2M creds when they're in the
+# environment so the printed config drives the cloud backend.
+env_entries=(
+  "\"GAR_API_URL\": \"${api_url}\""
+  "\"GAR_MCP_ROLE\": \"${role}\""
+)
+if [[ -n "${GAR_COGNITO_TOKEN_ENDPOINT:-}${GAR_COGNITO_CLIENT_ID:-}" ]]; then
+  env_entries+=(
+    "\"GAR_COGNITO_TOKEN_ENDPOINT\": \"${GAR_COGNITO_TOKEN_ENDPOINT:-}\""
+    "\"GAR_COGNITO_CLIENT_ID\": \"${GAR_COGNITO_CLIENT_ID:-}\""
+    "\"GAR_COGNITO_CLIENT_SECRET\": \"${GAR_COGNITO_CLIENT_SECRET:-}\""
+    "\"GAR_COGNITO_SCOPE\": \"${GAR_COGNITO_SCOPE:-gar-api/access}\""
+  )
+fi
+
+# Join the entries with commas, indented for the JSON env block.
+env_block=""
+for i in "${!env_entries[@]}"; do
+  comma=","
+  [[ "$i" -eq $((${#env_entries[@]} - 1)) ]] && comma=""
+  env_block+="        ${env_entries[$i]}${comma}"$'\n'
+done
+
 json=$(
   cat <<JSON
 {
@@ -57,9 +86,7 @@ json=$(
     "gar": {
       "command": "${command_path}",
       "env": {
-        "GAR_API_URL": "${api_url}",
-        "GAR_MCP_ROLE": "${role}"
-      }
+${env_block}      }
     }
   }
 }
@@ -90,6 +117,10 @@ if [[ "$target" == "claude-desktop" ]]; then
     echo "# Paste the block above into your Claude Desktop config, then restart it:"
     echo "#   macOS:   ~/Library/Application Support/Claude/claude_desktop_config.json"
     echo "#   Windows: %APPDATA%\\Claude\\claude_desktop_config.json"
-    echo "# Start the backend first: ./scripts/run-backend.sh"
+    if [[ -n "${GAR_COGNITO_TOKEN_ENDPOINT:-}${GAR_COGNITO_CLIENT_ID:-}" ]]; then
+      echo "# Cloud backend — already deployed; no local backend to start."
+    else
+      echo "# Local backend — start it first: ./scripts/run-backend.sh"
+    fi
   } >&2
 fi
