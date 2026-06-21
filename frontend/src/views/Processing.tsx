@@ -4,7 +4,8 @@
 
 import { Stepper } from "../components/Stepper";
 import type { RunState, RunStatus } from "../lib/api";
-import { useRunProgress } from "../lib/poll";
+import { useActivity, useRunProgress } from "../lib/poll";
+import { Activity } from "./Activity";
 
 const PHASE_LABEL: Partial<Record<RunStatus, string>> = {
   deriving_concept: "Deriving the core concept from your notes…",
@@ -22,6 +23,7 @@ export function Processing({
   onRestart: () => void;
 }) {
   const { phase, error } = useRunProgress(state, onAdvanced);
+  const activity = useActivity(state.run_id);
 
   if (error) {
     return (
@@ -47,6 +49,7 @@ export function Processing({
       <p className="muted" aria-live="polite">
         <span className="spinner" aria-hidden="true" /> {PHASE_LABEL[phase.status] ?? phase.status}
       </p>
+      <Activity items={activity} />
       <p className="muted" style={{ marginTop: "var(--sp-3)" }}>
         This typically takes 1–3 minutes. You can leave this page open; the run continues on the
         server.

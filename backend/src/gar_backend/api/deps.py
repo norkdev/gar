@@ -19,6 +19,8 @@ from gar_backend.api.auth import AuthError, bearer_token, get_verifier
 from gar_backend.governance.audit import (
     KNOWN_CLIENTS,
     AuditLogger,
+    AuditReader,
+    AuditSink,
     FileAuditSink,
     S3AuditSink,
 )
@@ -42,6 +44,7 @@ CLIENT_HEADER = "X-GAR-Client"
 
 
 _run_store: RunStore | None = None
+_audit_sink: AuditSink | None = None
 _audit_logger: AuditLogger | None = None
 _llm_client: LLMClient | None = None
 _public_source: PublicSource | None = None
@@ -63,16 +66,34 @@ def get_audit_log_path() -> Path:
     return Path(os.environ.get("GAR_AUDIT_LOG_PATH") or DEFAULT_AUDIT_LOG_PATH)
 
 
+def get_audit_sink() -> AuditSink:
+    """Process-wide audit sink. S3 on Lambda (``GAR_AUDIT_BUCKET``), else a local
+    JSONL file. Shared by the logger (which writes) and the activity reader
+    (which reads a run's records back)."""
+    global _audit_sink
+    if _audit_sink is None:
+        bucket = os.environ.get(AUDIT_BUCKET_ENV)
+        _audit_sink = (
+            S3AuditSink(bucket) if bucket else FileAuditSink(get_audit_log_path())
+        )
+    return _audit_sink
+
+
 def get_audit_logger() -> AuditLogger:
     """Process-wide base logger (holds the sink). Callers without an HTTP
     request — the CLI — use this directly and bind their own client via
     ``.for_client(...)``. HTTP routes use ``get_request_audit_logger`` instead."""
     global _audit_logger
     if _audit_logger is None:
-        bucket = os.environ.get(AUDIT_BUCKET_ENV)
-        sink = S3AuditSink(bucket) if bucket else FileAuditSink(get_audit_log_path())
-        _audit_logger = AuditLogger(sink)
+        _audit_logger = AuditLogger(get_audit_sink())
     return _audit_logger
+
+
+def get_audit_reader(sink: AuditSink = Depends(get_audit_sink)) -> AuditReader | None:
+    """The audit sink as a reader for the activity feed, or None if the sink
+    can't read back. Both real sinks (file + S3) implement ``read_for_run``;
+    the guard keeps a future write-only sink from breaking the endpoint."""
+    return sink if hasattr(sink, "read_for_run") else None
 
 
 def client_from_request(request: Request) -> str | None:

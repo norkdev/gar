@@ -10,6 +10,7 @@ from gar_backend.api.deps import (
     get_access_context,
     get_audit_log_path,
     get_audit_logger,
+    get_audit_sink,
     get_llm_client,
     get_run_store,
 )
@@ -66,12 +67,16 @@ def api_setup(tmp_path: Path) -> Any:
 
     audit_path = tmp_path / "audit.jsonl"
     store = InMemoryRunStore()
-    audit = AuditLogger(FileAuditSink(audit_path))
+    audit_sink = FileAuditSink(audit_path)
+    audit = AuditLogger(audit_sink)
     llm = StubLLM()
     access = AccessContext(tenant_id="default", role="owner")
 
     app.dependency_overrides[get_run_store] = lambda: store
     app.dependency_overrides[get_audit_logger] = lambda: audit
+    # The activity reader reads through the sink; share the one instance the
+    # logger writes to so the feed sees this test's records.
+    app.dependency_overrides[get_audit_sink] = lambda: audit_sink
     app.dependency_overrides[get_audit_log_path] = lambda: audit_path
     app.dependency_overrides[get_llm_client] = lambda: llm
     app.dependency_overrides[get_access_context] = lambda: access

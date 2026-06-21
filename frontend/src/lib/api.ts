@@ -189,3 +189,30 @@ export async function getRunReport(runId: string): Promise<ReportResponse> {
   const r = await fetch(await apiUrl(`/runs/${runId}/report`), { headers: apiHeaders() });
   return jsonOrThrow<ReportResponse>(r);
 }
+
+// ---- Activity feed (progress during in-progress phases) ----
+
+/** One human-readable progress line, derived server-side from the audit trail.
+ *  Replaces the retired SSE feed — the backend writes audit records as each
+ *  action happens, and we poll them back behind the Function URL. */
+export interface ActivityItem {
+  timestamp: string | null;
+  tool: string;
+  text: string;
+  status: "ok" | "error";
+}
+
+export interface ActivityResponse {
+  total: number;
+  items: ActivityItem[];
+}
+
+/** Fetch activity lines past `since` (how many the client already has). The
+ *  response carries the full `total` so a collapsed feed can show a count while
+ *  only new lines are transferred. */
+export async function getActivity(runId: string, since: number): Promise<ActivityResponse> {
+  const r = await fetch(await apiUrl(`/runs/${runId}/activity?since=${since}`), {
+    headers: apiHeaders(),
+  });
+  return jsonOrThrow<ActivityResponse>(r);
+}
