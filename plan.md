@@ -881,3 +881,63 @@ report. Opening a session loads its `RunState` and routes to the matching gate
   `go_back` tool + tests.
 - **B** (frontend): the two back buttons + confirm.
 - **C** (frontend): session list + navigation + completed-report rendering.
+
+---
+
+## 13. Cost-when-idle: secret-delete vs backup/restore (design, deferred 2026-06-21)
+
+Goal: spend ~nothing when GAR isn't in use, and come back cleanly. GAR is
+serverless, so idle cost is already ~$0 **except the two Secrets Manager
+secrets** (Anthropic + Voyage, ~$0.40/mo each) plus pennies of S3/DynamoDB
+storage. Two designs, both deferred; pick at implementation time.
+
+### Option A — delete the secrets when idle (cheap + simple)
+
+Force-delete the 2 secrets when idle; re-set them from `.env` on return. Nothing
+else is destroyed (Lambda / CloudFront / DynamoDB-on-demand / Cognito are all
+$0 idle), so there's no data loss, no Function-URL change, no client re-point.
+Gets to ~$0/mo with a one-liner each way:
+
+```
+# idle:    aws secretsmanager delete-secret --force-delete-without-recovery --secret-id <Anthropic/VoyageArn>
+# return:  aws secretsmanager put-secret-value --secret-id <new arn>  (re-deploy recreates the empty secret)
+```
+
+Caveat: deleting a CFN-managed secret out from under the stack leaves it in
+drift; cleaner is `cdk deploy` recreates the (empty) secret on return, then
+`put-secret-value`. A tiny helper could wrap this. This is the recommended
+low-effort path if cost is the only concern.
+
+### Option B — true zero-footprint: backup → destroy → restore
+
+For a clean/empty account when idle. What must survive a destroy:
+
+| Data | Where | Plan |
+|---|---|---|
+| Runs / sessions | DynamoDB `gar-runs` | back up (scan) + restore (batch-write) |
+| Candidate pools + audit | S3 state bucket | back up + restore (`aws s3 sync`) |
+| Cognito users + their `sub` | AuthStack | **keep AuthStack** (see below) |
+| Anthropic / Voyage keys | Secrets Manager | re-supplied from `.env` |
+| client ids / Function URL | Auth/Backend/Frontend | re-pointed on restore (runbook) |
+
+**Keep AuthStack (the crux).** `owner_user_id` is the Cognito user's `sub`, which
+is immutable and auto-assigned — recreating the pool gives new subs, so every
+restored session would 404 (not owned). AuthStack is free at idle, so keep it;
+destroy only `GarFrontendStack` + `GarBackendStack` + `GarDataStack`. Bonus: the
+M2M client id+secret stay stable, so `.mcp.json` keeps working unchanged.
+
+**Why restore just works** once data is back: the table name is fixed
+(`gar-runs`); S3 keys are bucket-relative (`{tenant}/{run}/candidates.json`,
+`audit/…`) so they resolve in the renamed bucket via `GAR_STATE_BUCKET`; and the
+preserved `sub` keeps the two-axis access check passing.
+
+**Pieces:** `scripts/gar-backup.sh` (DynamoDB scan → `backup/gar-runs.json`;
+`aws s3 sync` → `backup/state/`) and `scripts/gar-restore.sh` (batch-write,
+25/batch, via a small Python/boto3 helper; `aws s3 sync` back). Optional
+one-command `gar-down.sh` / `gar-up.sh` wrappers; `docs/deploy.md` gains the full
+cycle. **Backup location** (local `backup/` dir vs a persistent RETAIN'd S3
+bucket) — decide at implementation time.
+
+**Honest tradeoff:** Option B saves the same ~$1/mo as Option A but adds a
+backup system + a multi-step cycle each time. Worth it only for the
+zero-footprint / minimal-attack-surface goal, not for the dollars.
