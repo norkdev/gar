@@ -11,7 +11,7 @@
 
 import { useMemo, useState } from "react";
 import { Stepper } from "../components/Stepper";
-import { candidateCompositeId, selectSources } from "../lib/api";
+import { candidateCompositeId, goBack, selectSources } from "../lib/api";
 import type { Candidate, Direction, RunState } from "../lib/api";
 
 const ABSTRACT_PREVIEW_CHARS = 280;
@@ -146,6 +146,26 @@ export function SourceSelection({
     try {
       const next = await selectSources(state.run_id, Array.from(adopted));
       onAdvanced(next);
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const backToConcept = async () => {
+    if (
+      !window.confirm(
+        "Go back to edit the concept? Re-approving runs a new search, " +
+          "replacing these candidates.",
+      )
+    )
+      return;
+    setBusy(true);
+    setErr(null);
+    try {
+      const next = await goBack(state.run_id);
+      onAdvanced(next); // back to the concept gate; App re-routes by status
     } catch (e) {
       setErr(e instanceof Error ? e.message : String(e));
     } finally {
@@ -293,6 +313,9 @@ export function SourceSelection({
       <div className="row" style={{ marginTop: "var(--sp-5)" }}>
         <button onClick={submit} disabled={busy}>
           {busy ? "Starting compose…" : `Adopt ${adoptedCount} and compose report`}
+        </button>
+        <button type="button" className="secondary" onClick={backToConcept} disabled={busy}>
+          ← Back to concept
         </button>
         {!busy && adoptedCount === 0 && (
           <span className="muted">
