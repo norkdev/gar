@@ -16,15 +16,21 @@ app = cdk.App()
 data = DataStack(app, "GarDataStack")
 auth = AuthStack(app, "GarAuthStack")
 WorkflowStack(app, "GarWorkflowStack")
-BackendStack(
+backend = BackendStack(
     app,
     "GarBackendStack",
     runs_table=data.runs_table,
     state_bucket=data.state_bucket,
     cognito_issuer=auth.issuer,
-    cognito_client_id=auth.m2m_client.user_pool_client_id,
     cognito_scope=auth.api_scope,
 )
-FrontendStack(app, "GarFrontendStack")
+FrontendStack(
+    app,
+    "GarFrontendStack",
+    user_pool=auth.user_pool,
+    issuer=auth.issuer,
+    hosted_ui_domain=auth.hosted_ui_domain,
+    api_url=backend.api_url,
+)
 
 app.synth()

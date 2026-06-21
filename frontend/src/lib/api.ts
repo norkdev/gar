@@ -1,9 +1,9 @@
 // Typed client for the gar-backend HTTP API.
 //
 // Requests go through apiUrl/apiHeaders (lib/config): same-origin by default
-// (the Vite dev server proxies /runs/* to a local backend), or pointed at the
-// cloud Function URL with VITE_GAR_API_URL + VITE_GAR_API_KEY. Each call sends
-// X-GAR-Client (audit attribution) and, when configured, X-GAR-API-Key.
+// (the Vite dev server proxies /runs/* to a local backend), or the cloud
+// Function URL from the runtime config.json. Each call sends X-GAR-Client
+// (audit attribution) and, when signed in, the Cognito bearer token.
 
 import { apiHeaders, apiUrl } from "./config";
 
@@ -80,41 +80,47 @@ export interface NoteInput {
  *  but the browser UI uses content uploads exclusively — the picker
  *  cannot resolve absolute filesystem paths in any portable way.
  */
-export function createRunWithNotes(notes: NoteInput[]): Promise<RunState> {
-  return fetch(apiUrl("/runs"), {
+export async function createRunWithNotes(notes: NoteInput[]): Promise<RunState> {
+  const r = await fetch(await apiUrl("/runs"), {
     method: "POST",
     headers: apiHeaders({ json: true }),
     body: JSON.stringify({ notes_content: notes }),
-  }).then((r) => jsonOrThrow<RunState>(r));
+  });
+  return jsonOrThrow<RunState>(r);
 }
 
-export function getRun(runId: string, signal?: AbortSignal): Promise<RunState> {
-  return fetch(apiUrl(`/runs/${runId}`), { headers: apiHeaders(), signal }).then((r) =>
-    jsonOrThrow<RunState>(r),
-  );
+export async function getRun(runId: string, signal?: AbortSignal): Promise<RunState> {
+  const r = await fetch(await apiUrl(`/runs/${runId}`), {
+    headers: apiHeaders(),
+    signal,
+  });
+  return jsonOrThrow<RunState>(r);
 }
 
-export function approveConcept(runId: string, editedConcept?: string): Promise<RunState> {
-  return fetch(apiUrl(`/runs/${runId}/gates/concept`), {
+export async function approveConcept(runId: string, editedConcept?: string): Promise<RunState> {
+  const r = await fetch(await apiUrl(`/runs/${runId}/gates/concept`), {
     method: "POST",
     headers: apiHeaders({ json: true }),
     body: JSON.stringify(editedConcept !== undefined ? { edited_concept: editedConcept } : {}),
-  }).then((r) => jsonOrThrow<RunState>(r));
+  });
+  return jsonOrThrow<RunState>(r);
 }
 
-export function selectSources(runId: string, adoptedSourceIds: string[]): Promise<RunState> {
-  return fetch(apiUrl(`/runs/${runId}/gates/sources`), {
+export async function selectSources(runId: string, adoptedSourceIds: string[]): Promise<RunState> {
+  const r = await fetch(await apiUrl(`/runs/${runId}/gates/sources`), {
     method: "POST",
     headers: apiHeaders({ json: true }),
     body: JSON.stringify({ adopted_source_ids: adoptedSourceIds }),
-  }).then((r) => jsonOrThrow<RunState>(r));
+  });
+  return jsonOrThrow<RunState>(r);
 }
 
-export function approveReport(runId: string): Promise<RunState> {
-  return fetch(apiUrl(`/runs/${runId}/gates/report`), {
+export async function approveReport(runId: string): Promise<RunState> {
+  const r = await fetch(await apiUrl(`/runs/${runId}/gates/report`), {
     method: "POST",
     headers: apiHeaders(),
-  }).then((r) => jsonOrThrow<RunState>(r));
+  });
+  return jsonOrThrow<RunState>(r);
 }
 
 // In-progress statuses: the agent is working a segment; the UI polls getRun
