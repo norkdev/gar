@@ -451,3 +451,18 @@ async def test_get_report_reads_completed_run_from_context() -> None:
     assert out.markdown == "# Final Survey"
     assert out.status == "completed"
     await client.aclose()
+
+
+async def test_go_back_posts_the_back_endpoint() -> None:
+    rec: list[httpx.Request] = []
+    client = make_client(
+        recording_handler(
+            {"run_id": "r1", "status": "awaiting_concept_approval"}, recorder=rec
+        )
+    )
+    tools = tools_by_name(client)
+    out = await tools["go_back"].fn(run_id="r1")
+    assert rec[0].method == "POST"
+    assert rec[0].url.path == "/runs/r1/back"
+    assert out.status == "awaiting_concept_approval"
+    await client.aclose()

@@ -65,7 +65,7 @@ def test_v1_1_production_tools_are_all_public() -> None:
     assert public_names == {t.name for t in tools}
 
 
-def test_build_server_registers_seven_public_tools() -> None:
+def test_build_server_registers_the_public_tools() -> None:
     server = build_server(client=_client(), role="public")
     registered = asyncio.run(server.list_tools())
     names = {t.name for t in registered}
@@ -77,6 +77,7 @@ def test_build_server_registers_seven_public_tools() -> None:
         "select_sources",
         "approve_report",
         "get_report",
+        "go_back",
     }
 
 

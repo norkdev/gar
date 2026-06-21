@@ -830,3 +830,54 @@ the validation/app CNAMEs are added by hand. The custom domain also **stabilizes
 browser OAuth callback** (FrontendStack's browser client `callback_urls` would use the
 fixed domain instead of the CloudFront one). Deferred 2026-06-21 — revisit when a domain is
 available; until then, **keep the stack up** (don't destroy it) to hold the current URL.
+
+---
+
+## 12. Back-navigation between gates + session list (design, 2026-06-21)
+
+Two UX features. **Back-navigation** lets the human step back a gate; **session
+list** is the browser surface over the already-built session CRUD (slice 7).
+
+### D-207: "back" is a reverse transition + re-run forward, not a stored snapshot
+
+Going back steps the state machine **back one gate**, discards the now-stale
+downstream artifacts, and re-runs forward from there. Each gate's re-entry data
+is already carried in `RunState` — except the candidate pool, which is the one
+piece newly retained.
+
+- **Sources gate → Concept** (`revise_concept`): `AWAITING_SOURCE_SELECTION →
+  AWAITING_CONCEPT_APPROVAL`. Re-opens the concept (from `context`) as an
+  editable draft; clears search artifacts (candidates / directions /
+  adopted_evidence) — re-approving recomputes them via a fresh search. The
+  concept may change, so a new search is correct (and the cost is expected).
+- **Report gate → Sources** (`revise_sources`): `AWAITING_REPORT_APPROVAL →
+  AWAITING_SOURCE_SELECTION`. Restores the **same** candidate pool so the user
+  can adopt previously-unadopted sources (re-searching would yield a different
+  set); drops the report; re-selecting re-composes (no re-search — cheaper).
+- **Concept gate**: no back — going back there means abandoning the run, which
+  is just starting a new one.
+- **Pool retention**: the candidate pool stays in `pending_payload["candidates"]`
+  from the sources gate **through** the report gate (so `revise_sources` can
+  restore it), and is dropped at `approve_report` — completed **sessions stay
+  light** (D-204). This reuses the existing S3 offload of
+  `pending_payload["candidates"]`; no store change.
+- **API**: one `POST /runs/{id}/back` — owner-authorized, **audited**, dispatches
+  by current status. Pure transition, **no worker scheduled**; the forward
+  re-run uses the existing `approve_concept→search` / `select_sources→compose`
+  paths. Wrong status → 409.
+- **MCP parity**: a `go_back` tool (public role) maps onto the same endpoint.
+
+### Session list (frontend over slice-7 CRUD)
+
+Backend is done (`GET /runs` lean list, `GET /runs/{id}`, `…/report`, `DELETE`).
+Frontend adds a SessionList view (open / download / delete), a top-level App
+mode (Home ↔ Sessions ↔ Run), and a Completed view that renders the retained
+report. Opening a session loads its `RunState` and routes to the matching gate
+(or the report) by status.
+
+### Slices
+
+- **A** (backend + MCP): reverse transitions + pool retention + `POST /back` +
+  `go_back` tool + tests.
+- **B** (frontend): the two back buttons + confirm.
+- **C** (frontend): session list + navigation + completed-report rendering.

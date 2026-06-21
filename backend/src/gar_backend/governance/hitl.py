@@ -143,7 +143,10 @@ def select_sources(state: RunState, *, adopted_source_ids: list[str]) -> RunStat
         status=RunStatus.EVALUATING,
         context={**state.context, "adopted_evidence": adopted_evidence},
         adopted_source_ids=tuple(adopted_source_ids),
-        pending_payload={},
+        # Retain the full pool (not just the adopted subset) through the report
+        # gate so `revise_sources` (D-207 "back") can re-present the same papers.
+        # Dropped at approve_report → completed sessions stay light (D-204).
+        pending_payload={"candidates": candidates},
     )
 
 
@@ -162,6 +165,10 @@ def request_report_approval(
     payload: dict[str, Any] = {"report": report}
     if validation is not None:
         payload["report_validation"] = validation
+    # Carry the retained pool through to the report gate (for revise_sources).
+    candidates = state.pending_payload.get("candidates")
+    if candidates:
+        payload["candidates"] = candidates
     return _advance(
         state,
         status=RunStatus.AWAITING_REPORT_APPROVAL,
@@ -189,6 +196,42 @@ def approve_report(state: RunState) -> RunState:
         status=RunStatus.COMPLETED,
         context=context,
         pending_payload={},
+    )
+
+
+def revise_concept(state: RunState) -> RunState:
+    """Back: sources gate → concept gate (D-207).
+
+    Re-opens the derived concept for editing. The search artifacts (candidates,
+    directions, adopted evidence) are cleared because re-approving the concept
+    runs a fresh search — the concept may have changed."""
+    _require(state, RunStatus.AWAITING_SOURCE_SELECTION)
+    context = {
+        k: v
+        for k, v in state.context.items()
+        if k not in ("directions", "adopted_evidence")
+    }
+    return _advance(
+        state,
+        status=RunStatus.AWAITING_CONCEPT_APPROVAL,
+        context=context,
+        adopted_source_ids=(),
+        pending_payload={"concept": state.context.get("concept", "")},
+    )
+
+
+def revise_sources(state: RunState) -> RunState:
+    """Back: report gate → sources gate (D-207).
+
+    Restores the same candidate pool so the user can change which sources they
+    adopt; the report is dropped and re-composed on re-selection (no re-search).
+    `directions` stays in context so the grouped view still works."""
+    _require(state, RunStatus.AWAITING_REPORT_APPROVAL)
+    candidates = state.pending_payload.get("candidates", [])
+    return _advance(
+        state,
+        status=RunStatus.AWAITING_SOURCE_SELECTION,
+        pending_payload={"candidates": candidates},
     )
 
 

@@ -322,6 +322,15 @@ def make_tools(client: GarApiClient) -> list[McpTool]:
             warnings=warnings,
         )
 
+    async def go_back(run_id: str) -> GateResult:
+        """Step back one gate (the human asked to revise an earlier decision).
+        From the sources gate it re-opens the concept to edit (a fresh search
+        runs when you re-approve); from the report gate it returns to source
+        selection so different sources can be adopted (the report is re-composed,
+        no re-search). Not available at the concept gate or after completion."""
+        data = await client.go_back(run_id)
+        return GateResult(run_id=run_id, status=data["status"])
+
     return [
         McpTool("start_survey", _doc(start_survey), start_survey),
         McpTool("list_runs", _doc(list_runs), list_runs),
@@ -330,6 +339,7 @@ def make_tools(client: GarApiClient) -> list[McpTool]:
         McpTool("select_sources", _doc(select_sources) + _GATE_NOTE, select_sources),
         McpTool("approve_report", _doc(approve_report) + _GATE_NOTE, approve_report),
         McpTool("get_report", _doc(get_report), get_report),
+        McpTool("go_back", _doc(go_back) + _GATE_NOTE, go_back),
     ]
 
 
