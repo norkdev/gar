@@ -516,6 +516,7 @@ async def phase_compose_report(state: RunState, ctx: AgentContext) -> RunState:
         adopted_evidence=adopted_evidence_dicts,
         adopted_ids=adopted_ids,
         directions=state.context.get("directions"),
+        notes_text=_original_notes_text(state),
     )
     messages: list[Message] = [
         Message(
@@ -691,6 +692,7 @@ def _build_compose_user_text(
     adopted_evidence: list[dict[str, Any]],
     adopted_ids: list[str],
     directions: list[dict[str, Any]] | None = None,
+    notes_text: str = "",
 ) -> str:
     """Compose the user message for ``phase_compose_report``.
 
@@ -698,11 +700,20 @@ def _build_compose_user_text(
     for each adopted source — id, title, authors, published date, abstract —
     so titles in the rendered report match the citations (the LLM would
     otherwise have to guess titles from ids alone, leading to title /
-    citation mismatch).
+    citation mismatch). ``notes_text`` is the user's original idea notes, so
+    the report's "Referenced idea notes" section can summarize their content
+    instead of guessing file names (which compose otherwise never sees).
     """
+    notes_block = (
+        "\n\nThe user's ORIGINAL IDEA NOTES (summarize these by content for "
+        f'the "Referenced idea notes" section, not by file name):\n{notes_text}'
+        if notes_text
+        else ""
+    )
+
     if not adopted_evidence:
         return (
-            f"Concept:\n{concept}\n\n"
+            f"Concept:\n{concept}{notes_block}\n\n"
             "Adopted source IDs (from the candidate list at the previous "
             f"gate): {adopted_ids if adopted_ids else 'none'}\n"
             f"{_directions_block(directions)}\n\n"
@@ -711,7 +722,7 @@ def _build_compose_user_text(
         )
 
     parts: list[str] = [
-        f"Concept:\n{concept}\n",
+        f"Concept:\n{concept}{notes_block}\n",
         (
             "Adopted sources for this report — use ONLY these for citations, "
             "and use each source's TITLE, AUTHORS, and ABSTRACT verbatim "

@@ -110,8 +110,11 @@ form their own assessment of novelty and contribution.
 The report MUST include these sections, in this order:
 
 1. **Derived concept** — the agreed-upon concept text (paste it verbatim).
-2. **Referenced idea notes** — list of the user's note files that
-   contributed to the concept.
+2. **Referenced idea notes** — briefly summarize the user's idea notes
+   (provided below as ORIGINAL IDEA NOTES): the key point(s) each one
+   contributes to the concept. Characterize them by their **content**, not by
+   file name — the file labels are arbitrary (the notes were uploaded by
+   content) and may be omitted. If no notes are provided, write "none".
 3. **Similar related work** — for each adopted source: a short summary,
    the citation, and what specifically connects it to the concept. If
    multiple sources are similar, identify common ground and individual
