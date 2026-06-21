@@ -534,6 +534,26 @@ def test_compose_user_text_includes_directions_map() -> None:
     assert "Paper A" in text
 
 
+def test_compose_user_text_includes_idea_notes_for_section_2() -> None:
+    text = loop._build_compose_user_text(
+        concept="c",
+        adopted_evidence=[],
+        adopted_ids=[],
+        notes_text="--- a.md ---\nlatency-bound speculative decoding",
+    )
+    # The notes content reaches compose so section 2 summarizes substance,
+    # not a guessed file name.
+    assert "ORIGINAL IDEA NOTES" in text
+    assert "latency-bound speculative decoding" in text
+
+
+def test_compose_user_text_omits_notes_block_when_empty() -> None:
+    text = loop._build_compose_user_text(
+        concept="c", adopted_evidence=[], adopted_ids=[], notes_text=""
+    )
+    assert "ORIGINAL IDEA NOTES" not in text
+
+
 # ---------- phase_compose_report ----------
 
 
