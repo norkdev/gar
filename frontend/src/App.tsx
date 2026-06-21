@@ -36,15 +36,23 @@ function App() {
 
   if (authPhase === "loading") {
     return (
-      <main>
-        <p className="muted">
-          <span className="spinner" aria-hidden="true" /> Loading…
-        </p>
-      </main>
+      <>
+        <ThemeToggle />
+        <main>
+          <p className="muted">
+            <span className="spinner" aria-hidden="true" /> Loading…
+          </p>
+        </main>
+      </>
     );
   }
   if (authPhase === "anon") {
-    return <Login onLogin={() => void login()} />;
+    return (
+      <>
+        <ThemeToggle />
+        <Login onLogin={() => void login()} />
+      </>
+    );
   }
 
   return (

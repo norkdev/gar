@@ -1,35 +1,14 @@
-// Light / dark theme toggle. Persists to localStorage; respects the user's
-// system preference on first load.
+// Light / dark theme toggle. The theme is applied app-wide at startup
+// (lib/theme); this just switches and persists it.
 
 import { useEffect, useState } from "react";
-
-type Theme = "light" | "dark";
-
-function initialTheme(): Theme {
-  const stored = localStorage.getItem("gar.theme");
-  if (stored === "light" || stored === "dark") return stored;
-  if (typeof window !== "undefined" && window.matchMedia("(prefers-color-scheme: dark)").matches) {
-    return "dark";
-  }
-  return "light";
-}
-
-function applyTheme(theme: Theme) {
-  const root = document.documentElement;
-  root.classList.remove("light", "dark");
-  root.classList.add(theme);
-}
+import { applyTheme, initialTheme, type Theme } from "../lib/theme";
 
 export function ThemeToggle() {
-  const [theme, setTheme] = useState<Theme>(() => {
-    const t = initialTheme();
-    applyTheme(t);
-    return t;
-  });
+  const [theme, setTheme] = useState<Theme>(initialTheme);
 
   useEffect(() => {
     applyTheme(theme);
-    localStorage.setItem("gar.theme", theme);
   }, [theme]);
 
   const next: Theme = theme === "light" ? "dark" : "light";
