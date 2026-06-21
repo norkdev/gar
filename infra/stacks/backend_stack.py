@@ -57,7 +57,6 @@ class BackendStack(Stack):
         runs_table: dynamodb.ITable,
         state_bucket: s3.IBucket,
         cognito_issuer: str,
-        cognito_client_id: str,
         cognito_scope: str,
         **kwargs: object,
     ) -> None:
@@ -86,9 +85,11 @@ class BackendStack(Stack):
                 "GAR_AUDIT_BUCKET": state_bucket.bucket_name,  # durable audit log
                 "GAR_AUDIT_LOG_PATH": "/tmp/audit.jsonl",  # file-sink fallback
                 "GAR_ANTHROPIC_SECRET_ARN": anthropic_secret.secret_arn,
-                # Cognito JWT gate (api/auth): verify tokens from this pool/client.
+                # Cognito JWT gate (api/auth): verify tokens from this pool that
+                # carry the API scope. Both app clients (M2M + browser) hold the
+                # scope, so the issuer + scope are the gate; client-id pinning is
+                # left optional (unset here) to avoid a Backend→Frontend cycle.
                 "GAR_COGNITO_ISSUER": cognito_issuer,
-                "GAR_COGNITO_CLIENT_IDS": cognito_client_id,
                 "GAR_COGNITO_SCOPE": cognito_scope,
             },
             code=lambda_.Code.from_asset(
@@ -147,5 +148,6 @@ class BackendStack(Stack):
             ),
         )
         self.api_function = fn
+        self.api_url = url.url  # consumed by FrontendStack's config.json
         CfnOutput(self, "ApiFunctionUrl", value=url.url)
         CfnOutput(self, "AnthropicSecretArn", value=anthropic_secret.secret_arn)
