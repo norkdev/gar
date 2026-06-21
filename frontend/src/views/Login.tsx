@@ -3,7 +3,8 @@
 
 export function Login({ onLogin }: { onLogin: () => void }) {
   return (
-    <main>
+    <main className="has-corner-logo">
+      <img className="brand-logo" src="/gar.png" alt="GAR" />
       <h1>GAR — Guided Agentic Retrieval</h1>
       <p className="muted">
         Survey published literature against your own in-progress idea — grounded, cited, and
