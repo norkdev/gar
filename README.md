@@ -28,8 +28,8 @@ mechanism on its own. "Guided" sits at the surface because the agent is
 not fully autonomous; "governance" describes how that guidance is enforced
 inside.
 
-> Status (v2.0.0): backend complete and **deployed to AWS** (Lambda +
-> DynamoDB + S3 + Secrets Manager), verified live; 403 unit / integration
+> Status (v2.1.0): backend complete and **deployed to AWS** (Lambda +
+> DynamoDB + S3 + Secrets Manager), verified live; 453 unit / integration
 > tests passing; end-to-end smoke runs against the live arXiv and Anthropic
 > Claude APIs have produced complete, cited reports, driven over the
 > Web UI, the MCP server, and the cloud deployment. Retrieval has a swappable **rerank
@@ -40,8 +40,10 @@ inside.
 > cut cost. A third client — an MCP server (`gar-mcp`) exposing the
 > governed gates over stdio — ships alongside the CLI and Web UI. **v2.x**
 > lifts the same backend to AWS (Lambda + DynamoDB + S3 + Secrets Manager,
-> async self-invoke worker, Cognito auth), deployed and verified live;
-> per-user identity and browser hosting are v2.1.
+> async self-invoke worker, Cognito auth), deployed and verified live.
+> **v2.1** adds unified **Cognito JWT** auth (one path: M2M for the MCP/CLI
+> clients, sign-in for the browser) and **public browser hosting** (S3 +
+> CloudFront behind a custom domain).
 
 ---
 
@@ -637,7 +639,7 @@ service and no embeddings key.
 ### Tests
 
 ```bash
-uv run --package gar-backend pytest backend/tests/   # 403 tests
+uv run --package gar-backend pytest backend/tests/   # 453 tests
 (cd frontend && npm run build)                       # type-check + bundle
 ```
 
@@ -705,7 +707,7 @@ frontend/src/
 
 infra/                  AWS CDK (Python) — Data + Auth + Backend + Frontend deployed;
                         Workflow scaffold (see docs/deploy.md)
-backend/tests/          426 tests, mirrors src/ layout
+backend/tests/          453 tests, mirrors src/ layout
 spec.md                 Working spec (Japanese)
 CLAUDE.md               Notes for Claude Code working in this repo
 ```
